@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "nodemon server.js",
     "start": "node server.js",
+    "db:reset": "node scripts/reset-db.js",
     "create-users": "node create-users.js"
   },
   "dependencies": {

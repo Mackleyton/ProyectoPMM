@@ -89,7 +89,7 @@ export default function UploadPage({ onUploadFinished }) {
       {error && <div className="msg-error">⚠️ {error}</div>}
       {result && (
         <div className="msg-success">
-          ✅ Planilla procesada con éxito — {result.registros ? result.registros.toLocaleString('es-CL') : '6.000+'} registros disponibles en la plataforma.
+          ✅ {result.message || 'Planilla procesada con éxito'} — {result.importedRows ?? result.registros ?? 0} registros importados en el sistema{result.rejectedRows > 0 ? ` (${result.rejectedRows} filas omitidas o rechazadas)` : ''}.
         </div>
       )}
 

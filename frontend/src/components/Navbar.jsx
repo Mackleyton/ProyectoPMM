@@ -9,7 +9,7 @@ export default function Navbar({
   onToggleMobileFrame,
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = user?.role === 'ADMIN' || user?.role === 'admin';
 
   return (
     <header className="main-navbar">

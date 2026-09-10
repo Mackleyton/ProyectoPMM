@@ -2,53 +2,52 @@ import { useState } from 'react';
 import { apiService } from '../services/apiService';
 
 export default function LoginPage({ onLogin }) {
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  async function handleSubmit(e) {
+  async function executeLogin(userToAuth, passToAuth) {
+    setError('');
+    setLoading(true);
+    try {
+      const data = await apiService.login(userToAuth, passToAuth);
+      onLogin(data.user);
+    } catch (err) {
+      setError(err.message || 'Usuario o contraseña incorrectos.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleSubmit(e) {
     e.preventDefault();
-    if (!email.trim()) {
-      setError('Por favor ingrese su correo institucional o usuario');
+    if (!username.trim()) {
+      setError('Por favor ingrese su usuario o correo institucional');
       return;
     }
-    setError('');
-
-    // Intentar autenticación real contra PostgreSQL en el backend
-    const res = await apiService.login(email.trim(), password || 'Admin123!');
-    const isAdmin =
-      email.toLowerCase().includes('admin') ||
-      res.data?.user?.role === 'ADMIN';
-
-    onLogin({
-      name: isAdmin ? 'Coordinador Social' : 'Funcionario Terreno',
-      email: email.trim(),
-      role: isAdmin ? 'admin' : 'terreno',
-    });
+    if (!password) {
+      setError('Por favor ingrese su contraseña');
+      return;
+    }
+    executeLogin(username.trim(), password);
   }
 
-  async function handleQuickLogin(role) {
+  function handleQuickLogin(role) {
     if (role === 'admin') {
-      await apiService.login('admin', 'Admin123!');
-      onLogin({
-        name: 'Administrador Social',
-        email: 'admin.social@quilpue.cl',
-        role: 'admin',
-      });
+      setUsername('admin');
+      setPassword('Admin123!');
+      executeLogin('admin', 'Admin123!');
     } else {
-      await apiService.login('terreno', 'Terreno123!');
-      onLogin({
-        name: 'Operador Terreno 1',
-        email: 'terreno.social@quilpue.cl',
-        role: 'terreno',
-      });
+      setUsername('terreno');
+      setPassword('Terreno123!');
+      executeLogin('terreno', 'Terreno123!');
     }
   }
-
 
   return (
     <div className="login-wrapper">
-      {/* Columna Izquierda (Visible en Desktop) con Ilustración Arquitectónica de Quilpué */}
+      {/* Columna Izquierda (Desktop) con Ilustración de Quilpué */}
       <div className="login-side-illustration">
         <div className="illustration-container">
           <img
@@ -86,19 +85,20 @@ export default function LoginPage({ onLogin }) {
             <div className="brand-dept-tag">Departamento Social</div>
           </div>
 
-          {/* Formulario */}
+          {/* Formulario conectado directamente al Backend */}
           <form className="login-form" onSubmit={handleSubmit}>
             {error && <div className="login-error-msg">⚠️ {error}</div>}
 
             <div className="login-input-group">
-              <label htmlFor="login-email">Correo</label>
+              <label htmlFor="login-email">Usuario o Correo Institucional</label>
               <input
                 id="login-email"
-                type="email"
-                placeholder="ingrese su correo"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                autoComplete="email"
+                type="text"
+                placeholder="Ej: admin o terreno"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                autoComplete="username"
+                disabled={loading}
               />
             </div>
 
@@ -107,38 +107,45 @@ export default function LoginPage({ onLogin }) {
               <input
                 id="login-pass"
                 type="password"
-                placeholder="ingrese su contraseña"
+                placeholder="Ej: Admin123! o Terreno123!"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
+                disabled={loading}
               />
-              <a href="#olvido" className="forgot-link" onClick={(e) => e.preventDefault()}>
-                ¿Olvidó su contraseña?
-              </a>
+              <span className="forgot-link" style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                Credenciales oficiales verificadas por el backend
+              </span>
             </div>
 
-            <button type="submit" className="btn btn-yellow login-submit-btn">
-              Ingresar
+            <button
+              type="submit"
+              className="btn btn-yellow login-submit-btn"
+              disabled={loading}
+            >
+              {loading ? 'Validando credenciales…' : 'Ingresar'}
             </button>
           </form>
 
-          {/* Botones de Acceso Rápido para Demostración y Pruebas de Roles */}
+          {/* Botones de Acceso Rápido con credenciales oficiales */}
           <div className="quick-access-section">
-            <span className="quick-access-title">Acceso Rápido por Perfil (Demo)</span>
+            <span className="quick-access-title">Credenciales Oficiales del Backend</span>
             <div className="quick-btn-grid">
               <button
                 type="button"
                 className="quick-role-btn terreno"
                 onClick={() => handleQuickLogin('terreno')}
+                disabled={loading}
               >
-                📱 Perfil Terreno (Entregas & Actas)
+                📱 Operador Terreno (<code>terreno</code> / <code>Terreno123!</code>)
               </button>
               <button
                 type="button"
                 className="quick-role-btn admin"
                 onClick={() => handleQuickLogin('admin')}
+                disabled={loading}
               >
-                📊 Perfil Administrador (Dashboard KPIs)
+                📊 Administrador (<code>admin</code> / <code>Admin123!</code>)
               </button>
             </div>
           </div>

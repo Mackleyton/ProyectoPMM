@@ -23,25 +23,32 @@ export default function AdminDashboardPage() {
     cargarKpis();
   }, []);
 
-  const total = kpis?.totalRegistros || 5248;
-  const entregados = kpis?.totalEntregados || 3685;
-  const pendientes = kpis?.totalPendientes || 1563;
-  const entregadosHoy = kpis?.entregadosHoy || 1348;
+  const total = kpis?.totalRegistros ?? 0;
+  const entregados = kpis?.totalEntregados ?? 0;
+  const pendientes = kpis?.totalPendientes ?? 0;
+  const entregadosHoy = kpis?.entregadosHoy ?? 0;
+  const avance = total > 0 ? Math.round((entregados / total) * 100) : 0;
 
   // Datos para el gráfico Donut de Estados
   const donutData = [
-    { label: 'Entregados', value: entregados, color: '#2563eb' },
-    { label: 'Pendientes', value: pendientes, color: '#a855f7' },
-    { label: 'Rechazados / Otros', value: 420, color: '#fbbf24' },
+    { label: 'Entregados', value: entregados, color: '#16a34a' },
+    { label: 'Pendientes', value: pendientes, color: '#2563eb' },
   ];
 
-  // Datos para el gráfico de barras de tiempos de entrega
-  const barData = [
-    { label: '09:00 - 11:00', value: 380, color: '#3b82f6' },
-    { label: '11:00 - 13:00', value: 495, color: '#a855f7' },
-    { label: '13:00 - 15:00', value: 620, color: '#f97316' },
-    { label: '15:00 - 17:00', value: 245, color: '#fbbf24' },
-  ];
+  // Datos para el gráfico de barras por sector
+  const barData = (kpis?.deliveriesBySector && kpis.deliveriesBySector.length > 0)
+    ? kpis.deliveriesBySector.map((s, idx) => ({
+        label: s.sector,
+        value: s.deliveries,
+        color: ['#2563eb', '#7c3aed', '#ea580c', '#eab308', '#06b6d4'][idx % 5],
+      }))
+    : [
+        { label: 'Belloto Norte', value: 320, color: '#2563eb' },
+        { label: 'Belloto Sur', value: 410, color: '#7c3aed' },
+        { label: 'Quilpué Centro', value: 560, color: '#ea580c' },
+        { label: 'Canal Chacao', value: 230, color: '#eab308' },
+        { label: 'Pompeya', value: 180, color: '#06b6d4' },
+      ];
 
   return (
     <div className="admin-dashboard-container">
@@ -72,11 +79,11 @@ export default function AdminDashboardPage() {
         </div>
       </div>
 
-      {/* TARJETAS KPIS (preliminar2.png - pantalla 5) */}
+      {/* TARJETAS KPIS */}
       <div className="kpi-cards-grid">
         {/* Total de beneficiarios */}
         <div className="kpi-stat-card border-gray">
-          <span className="kpi-card-label">Total de beneficiarios</span>
+          <span className="kpi-card-label">Total de beneficios</span>
           <div className="kpi-card-value">{total.toLocaleString('es-CL')}</div>
           <span className="kpi-card-desc">Padrón total asignado</span>
         </div>
@@ -86,7 +93,7 @@ export default function AdminDashboardPage() {
           <span className="kpi-card-label">Entregados</span>
           <div className="kpi-card-value text-yellow">{entregados.toLocaleString('es-CL')}</div>
           <span className="kpi-card-desc">
-            {Math.round((entregados / total) * 100)}% de avance global
+            {avance}% de avance global
           </span>
         </div>
 
@@ -99,19 +106,19 @@ export default function AdminDashboardPage() {
 
         {/* Entregados en el día */}
         <div className="kpi-stat-card border-gray">
-          <span className="kpi-card-label">Entregados en el día</span>
+          <span className="kpi-card-label">Entregados hoy</span>
           <div className="kpi-card-value">{entregadosHoy.toLocaleString('es-CL')}</div>
           <span className="kpi-card-desc">Jornada de terreno actual</span>
         </div>
       </div>
 
-      {/* GRÁFICOS ESTADÍSTICOS (preliminar2.png - pantalla 5) */}
+      {/* GRÁFICOS ESTADÍSTICOS */}
       <div className="charts-grid-two">
-        {/* Gráfico 1: Tiempos de entrega */}
+        {/* Gráfico 1: Entregas por sector */}
         <div className="chart-panel-card">
           <div className="chart-panel-header">
-            <h3>Tiempos de entrega</h3>
-            <span className="chart-panel-badge">Por franja horaria</span>
+            <h3>Distribución Territorial</h3>
+            <span className="chart-panel-badge">Por sector comarcal</span>
           </div>
           <div className="chart-panel-content">
             <BarChart items={barData} />
@@ -121,7 +128,7 @@ export default function AdminDashboardPage() {
         {/* Gráfico 2: Estados de entregas */}
         <div className="chart-panel-card">
           <div className="chart-panel-header">
-            <h3>Estados de entregas</h3>
+            <h3>Estado de Cumplimiento</h3>
             <span className="chart-panel-badge">Consolidado general</span>
           </div>
           <div className="chart-panel-content">

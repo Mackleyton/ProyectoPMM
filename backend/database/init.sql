@@ -1,9 +1,23 @@
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- =========================================================
--- Usuarios internos del sistema
+-- REINICIO TOTAL DE TABLAS (DROP PREVIO)
 -- =========================================================
-CREATE TABLE IF NOT EXISTS users (
+DROP TABLE IF EXISTS delivery_evidences CASCADE;
+DROP TABLE IF EXISTS delivery_items CASCADE;
+DROP TABLE IF EXISTS deliveries CASCADE;
+DROP TABLE IF EXISTS beneficiary_benefits CASCADE;
+DROP TABLE IF EXISTS benefit_types CASCADE;
+DROP TABLE IF EXISTS students CASCADE;
+DROP TABLE IF EXISTS guardians CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
+DROP TABLE IF EXISTS import_errors CASCADE;
+DROP TABLE IF EXISTS import_batches CASCADE;
+
+-- =========================================================
+-- 1. Usuarios internos del sistema
+-- =========================================================
+CREATE TABLE users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   username VARCHAR(100) NOT NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
@@ -13,188 +27,205 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 -- =========================================================
--- Apoderados / adultos responsables
+-- 2. Apoderados / adultos responsables
 -- =========================================================
-CREATE TABLE IF NOT EXISTS guardians (
+CREATE TABLE guardians (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
   rut VARCHAR(12) NOT NULL UNIQUE,
-
   first_name VARCHAR(120) NOT NULL,
   paternal_last_name VARCHAR(120),
   maternal_last_name VARCHAR(120),
   birth_date VARCHAR(50),
-
   address TEXT,
   sector VARCHAR(150),
   email VARCHAR(180),
   phone VARCHAR(50),
-
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- =========================================================
--- Alumnos asociados a un apoderado
+-- 3. Alumnos asociados a un apoderado
 -- =========================================================
-CREATE TABLE IF NOT EXISTS students (
+CREATE TABLE students (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
   guardian_id UUID NOT NULL REFERENCES guardians(id) ON DELETE CASCADE,
-
   rut VARCHAR(12) NOT NULL UNIQUE,
-
   first_name VARCHAR(120) NOT NULL,
   paternal_last_name VARCHAR(120),
   maternal_last_name VARCHAR(120),
-
   establishment VARCHAR(250),
   educational_level VARCHAR(150),
-
   fibe_benefited BOOLEAN NOT NULL DEFAULT FALSE,
   automatic_renewal VARCHAR(80),
   application_status VARCHAR(120),
-
   application_date VARCHAR(50),
   delivery_day VARCHAR(50),
   delivery_time VARCHAR(50),
   delivery_table VARCHAR(50),
-
   imported_delivery_date VARCHAR(50),
   imported_delivered_by VARCHAR(150),
-
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- =========================================================
--- Catálogo de tipos de beneficios
+-- 4. Catálogo de tipos de beneficios
 -- =========================================================
-CREATE TABLE IF NOT EXISTS benefit_types (
+CREATE TABLE benefit_types (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name VARCHAR(180) NOT NULL UNIQUE,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- =========================================================
--- Beneficios asignados a cada alumno
+-- 5. Beneficios asignados a cada alumno
 -- =========================================================
-CREATE TABLE IF NOT EXISTS beneficiary_benefits (
+CREATE TABLE beneficiary_benefits (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
   guardian_id UUID NOT NULL REFERENCES guardians(id) ON DELETE CASCADE,
   student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
   benefit_type_id UUID NOT NULL REFERENCES benefit_types(id),
-
   status VARCHAR(30) NOT NULL DEFAULT 'PENDING'
     CHECK (status IN ('PENDING', 'DELIVERED', 'CANCELLED')),
-
   delivered_at TIMESTAMP NULL,
-
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-  CONSTRAINT unique_student_benefit
-    UNIQUE (student_id, benefit_type_id)
+  CONSTRAINT unique_student_benefit UNIQUE (student_id, benefit_type_id)
 );
 
 -- =========================================================
--- Registro histórico de entregas
+-- 6. Registro de entregas
 -- =========================================================
-CREATE TABLE IF NOT EXISTS deliveries (
+CREATE TABLE deliveries (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
   guardian_id UUID NOT NULL REFERENCES guardians(id),
-  delivered_by UUID REFERENCES users(id),
-
+  delivered_by UUID NOT NULL REFERENCES users(id),
   notes TEXT,
   delivered_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- Detalle de cada beneficio incluido en una entrega
-CREATE TABLE IF NOT EXISTS delivery_items (
+CREATE TABLE delivery_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
   delivery_id UUID NOT NULL REFERENCES deliveries(id) ON DELETE CASCADE,
   beneficiary_benefit_id UUID NOT NULL REFERENCES beneficiary_benefits(id),
-
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-  CONSTRAINT unique_delivery_benefit
-    UNIQUE (delivery_id, beneficiary_benefit_id)
+  CONSTRAINT unique_delivery_benefit UNIQUE (delivery_id, beneficiary_benefit_id)
 );
 
--- =========================================================
--- Fotografías / evidencias de actas
--- =========================================================
-CREATE TABLE IF NOT EXISTS delivery_evidences (
+CREATE TABLE delivery_evidences (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
   delivery_id UUID NOT NULL REFERENCES deliveries(id) ON DELETE CASCADE,
   guardian_id UUID NOT NULL REFERENCES guardians(id),
-
   logical_file_name VARCHAR(255) NOT NULL,
   storage_key VARCHAR(500) NOT NULL UNIQUE,
-
   mime_type VARCHAR(100) NOT NULL,
   file_size_bytes INTEGER NOT NULL,
   file_hash_sha256 VARCHAR(64) NOT NULL,
-
   uploaded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- =========================================================
--- Historial de importaciones Excel
--- =========================================================
-CREATE TABLE IF NOT EXISTS import_batches (
+CREATE TABLE import_batches (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
   original_file_name VARCHAR(255) NOT NULL,
   total_rows INTEGER NOT NULL DEFAULT 0,
   imported_rows INTEGER NOT NULL DEFAULT 0,
   rejected_rows INTEGER NOT NULL DEFAULT 0,
-
   imported_by UUID REFERENCES users(id),
-
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS import_errors (
+CREATE TABLE import_errors (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-  import_batch_id UUID NOT NULL
-    REFERENCES import_batches(id)
-    ON DELETE CASCADE,
-
+  import_batch_id UUID NOT NULL REFERENCES import_batches(id) ON DELETE CASCADE,
   row_number INTEGER NOT NULL,
   error_message TEXT NOT NULL,
   raw_data JSONB,
-
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- =========================================================
--- Índices
+-- ÍNDICES
 -- =========================================================
-CREATE INDEX IF NOT EXISTS idx_guardians_rut
-ON guardians(rut);
+CREATE INDEX idx_guardians_rut ON guardians(rut);
+CREATE INDEX idx_students_guardian_id ON students(guardian_id);
+CREATE INDEX idx_students_rut ON students(rut);
+CREATE INDEX idx_beneficiary_benefits_guardian ON beneficiary_benefits(guardian_id);
+CREATE INDEX idx_beneficiary_benefits_student ON beneficiary_benefits(student_id);
+CREATE INDEX idx_beneficiary_benefits_status ON beneficiary_benefits(status);
+CREATE INDEX idx_deliveries_date ON deliveries(delivered_at);
 
-CREATE INDEX IF NOT EXISTS idx_students_guardian_id
-ON students(guardian_id);
+-- =========================================================
+-- POBLACIÓN DE DATOS DE EJEMPLO (SEED)
+-- =========================================================
 
-CREATE INDEX IF NOT EXISTS idx_students_rut
-ON students(rut);
+-- Usuarios del sistema
+INSERT INTO users (id, username, password_hash, role) VALUES
+  ('a0000000-0000-0000-0000-000000000001', 'admin', '$2a$10$BZr/rCWSCTN7k2aoBXBTkOvNJOGh.SLot6UhrZS9KAtAbiPbrS3pS', 'ADMIN'),
+  ('a0000000-0000-0000-0000-000000000002', 'terreno', '$2a$10$y9O9/OpLu/gjHq8XW0DkXuv13NZBtYK.av0nwo0ZYiJS3dpAKYhza', 'FIELD_AGENT');
 
-CREATE INDEX IF NOT EXISTS idx_beneficiary_benefits_guardian
-ON beneficiary_benefits(guardian_id);
+-- Catálogo de Beneficios
+INSERT INTO benefit_types (id, name) VALUES
+  ('b0000000-0000-0000-0000-000000000001', 'Set Escolar 2026 - PRE-BÁSICA (KÍNDER)'),
+  ('b0000000-0000-0000-0000-000000000002', 'Set Escolar 2026 - BÁSICA PRIMER CICLO (1° A 4° BÁSICO)'),
+  ('b0000000-0000-0000-0000-000000000003', 'Set Escolar 2026 - BÁSICA SEGUNDO CICLO (5° A 8° BÁSICO)'),
+  ('b0000000-0000-0000-0000-000000000004', 'Set Escolar 2026 - MEDIA');
 
-CREATE INDEX IF NOT EXISTS idx_beneficiary_benefits_student
-ON beneficiary_benefits(student_id);
+-- Apoderados de Quilpué
+INSERT INTO guardians (id, rut, first_name, paternal_last_name, maternal_last_name, birth_date, address, sector, email, phone) VALUES
+  ('c0000000-0000-0000-0000-000000000001', '15.892.415-3', 'CAROLINA', 'MONTERO', 'SILVA', '14/05/1985', 'AV. LOS CARRERA 850', 'BELLOTO CENTRO', 'CAROLINA.MONTERO@GMAIL.COM', '987654321'),
+  ('c0000000-0000-0000-0000-000000000002', '16.234.567-2', 'ROBERTO', 'GONZÁLEZ', 'MUÑOZ', '22/08/1987', 'CALLE FREIRE 1420', 'CENTRO', 'ROBERTO.GONZALEZ@HOTMAIL.COM', '976543210'),
+  ('c0000000-0000-0000-0000-000000000003', '17.456.789-1', 'MARCELA', 'ARAYA', 'CASTRO', '03/11/1990', 'PASAJE EL ROBLE 345', 'POMPEYA', 'MARCELA.ARAYA@GMAIL.COM', '965432109'),
+  ('c0000000-0000-0000-0000-000000000004', '14.567.890-0', 'MAURICIO', 'VERA', 'TAPIA', '19/04/1982', 'AV. VALENCIA 1240', 'VALENCIA', 'M.VERA.TAPIA@GMAIL.COM', '954321098'),
+  ('c0000000-0000-0000-0000-000000000005', '13.890.123-8', 'PATRICIA', 'MORALES', 'HERRERA', '07/09/1980', 'CALLE AVIADOR ACEVEDO 512', 'BELLOTO NORTE', 'PATRICIA.MORALES.H@GMAIL.COM', '943210987'),
+  ('c0000000-0000-0000-0000-000000000006', '18.123.456-3', 'GONZALO', 'RIQUELME', 'FUENTES', '29/01/1992', 'PASAJE LAS ESTRELLAS 88', 'CANAL CHACAO', 'GONZALO.RIQUELME@GMAIL.COM', '932109876'),
+  ('c0000000-0000-0000-0000-000000000007', '15.432.109-8', 'LORENA', 'SEPÚLVEDA', 'PEÑA', '18/06/1984', 'AV. MARGA MARGA 2150', 'RETIRO', 'LORENA.SEPULVEDA@GMAIL.COM', '921098765'),
+  ('c0000000-0000-0000-0000-000000000008', '16.890.321-9', 'CRISTIÁN', 'TORRES', 'PAVEZ', '05/12/1988', 'CAMINO TRONCAL 410', 'PASO HONDO', 'CRISTIAN.TORRES.P@GMAIL.COM', '910987654'),
+  ('c0000000-0000-0000-0000-000000000009', '17.123.789-0', 'DANIELA', 'PINTO', 'ROJAS', '11/03/1989', 'CALLE BADEN POWELL 720', 'BELLOTO SUR', 'DANIELA.PINTO.R@GMAIL.COM', '909876543'),
+  ('c0000000-0000-0000-0000-000000000010', '16.033.988-8', 'GIANINA', 'MONTENEGRO', 'ARAYA', '24/07/1986', 'CALLE QUILLOTA 118', 'CENTRO', 'GMONTENEGRO.M.A@GMAIL.COM', '954034042');
 
-CREATE INDEX IF NOT EXISTS idx_beneficiary_benefits_status
-ON beneficiary_benefits(status);
+-- Estudiantes asociados
+INSERT INTO students (id, guardian_id, rut, first_name, paternal_last_name, maternal_last_name, establishment, educational_level, application_status) VALUES
+  ('d0000000-0000-0000-0000-000000000001', 'c0000000-0000-0000-0000-000000000001', '23.456.789-6', 'MATÍAS', 'VALENZUELA', 'MONTERO', 'LICEO SAN JUAN XXIII', 'BÁSICA SEGUNDO CICLO (5° A 8° BÁSICO)', 'APROBADA'),
+  ('d0000000-0000-0000-0000-000000000002', 'c0000000-0000-0000-0000-000000000001', '25.123.456-6', 'SOFÍA', 'VALENZUELA', 'MONTERO', 'COLEGIO CREP DE QUILPUÉ', 'BÁSICA PRIMER CICLO (1° A 4° BÁSICO)', 'APROBADA'),
+  ('d0000000-0000-0000-0000-000000000003', 'c0000000-0000-0000-0000-000000000002', '24.567.890-8', 'LUCAS', 'GONZÁLEZ', 'SOTO', 'COLEGIO ANDRÉS BELLO', 'MEDIA', 'APROBADA'),
+  ('d0000000-0000-0000-0000-000000000004', 'c0000000-0000-0000-0000-000000000003', '24.111.222-5', 'VICENTE', 'CASTRO', 'ARAYA', 'COLEGIO NUEVO HORIZONTE', 'BÁSICA SEGUNDO CICLO (5° A 8° BÁSICO)', 'APROBADA'),
+  ('d0000000-0000-0000-0000-000000000005', 'c0000000-0000-0000-0000-000000000003', '26.333.444-2', 'FLORENCIA', 'CASTRO', 'ARAYA', 'COLEGIO INFANTES DEL SOL', 'BÁSICA PRIMER CICLO (1° A 4° BÁSICO)', 'APROBADA'),
+  ('d0000000-0000-0000-0000-000000000006', 'c0000000-0000-0000-0000-000000000003', '27.555.666-1', 'TOMÁS', 'CASTRO', 'ARAYA', 'JARDÍN INFANTIL LOS DUENDECITOS', 'PRE-BÁSICA (KÍNDER)', 'APROBADA'),
+  ('d0000000-0000-0000-0000-000000000007', 'c0000000-0000-0000-0000-000000000004', '23.789.012-4', 'CAMILA', 'VERA', 'ROJAS', 'COLEGIO CAPITÁN IGNACIO CARRERA PINTO', 'MEDIA', 'APROBADA'),
+  ('d0000000-0000-0000-0000-000000000008', 'c0000000-0000-0000-0000-000000000005', '22.678.901-4', 'ESTEBAN', 'MORALES', 'MORALES', 'LICEO POLITÉCNICO AMÉRICA', 'MEDIA', 'APROBADA'),
+  ('d0000000-0000-0000-0000-000000000009', 'c0000000-0000-0000-0000-000000000006', '25.890.123-1', 'MARTINA', 'RIQUELME', 'ESPINOZA', 'COLEGIO SAN NICOLÁS CANAL CHACAO', 'BÁSICA PRIMER CICLO (1° A 4° BÁSICO)', 'APROBADA'),
+  ('d0000000-0000-0000-0000-000000000010', 'c0000000-0000-0000-0000-000000000007', '23.901.234-5', 'MAXIMILIANO', 'SEPÚLVEDA', 'SEPÚLVEDA', 'COLEGIO CREP QUILPUÉ', 'MEDIA', 'APROBADA'),
+  ('d0000000-0000-0000-0000-000000000011', 'c0000000-0000-0000-0000-000000000007', '26.012.345-9', 'EMILIA', 'SEPÚLVEDA', 'SEPÚLVEDA', 'COLEGIO CRISTIANO DE QUILPUÉ', 'BÁSICA PRIMER CICLO (1° A 4° BÁSICO)', 'APROBADA'),
+  ('d0000000-0000-0000-0000-000000000012', 'c0000000-0000-0000-0000-000000000008', '24.789.456-K', 'JOAQUÍN', 'TORRES', 'GARRIDO', 'COLEGIO ESPERANZA', 'BÁSICA SEGUNDO CICLO (5° A 8° BÁSICO)', 'APROBADA'),
+  ('d0000000-0000-0000-0000-000000000013', 'c0000000-0000-0000-0000-000000000009', '25.345.678-7', 'ÁLVARO', 'PINTO', 'PINTO', 'KING EDWARD SCHOOL', 'BÁSICA PRIMER CICLO (1° A 4° BÁSICO)', 'APROBADA'),
+  ('d0000000-0000-0000-0000-000000000014', 'c0000000-0000-0000-0000-000000000009', '27.890.123-8', 'JAVIERA', 'PINTO', 'PINTO', 'KING EDWARD SCHOOL', 'PRE-BÁSICA (KÍNDER)', 'APROBADA'),
+  ('d0000000-0000-0000-0000-000000000015', 'c0000000-0000-0000-0000-000000000010', '24.025.298-8', 'IGNACIO', 'MARAMBIO', 'MONTENEGRO', 'COLEGIO ESPERANZA', 'BÁSICA SEGUNDO CICLO (5° A 8° BÁSICO)', 'APROBADA');
 
-CREATE INDEX IF NOT EXISTS idx_deliveries_date
-ON deliveries(delivered_at);
+-- Asignación de Beneficios
+INSERT INTO beneficiary_benefits (id, guardian_id, student_id, benefit_type_id, status, delivered_at) VALUES
+  ('e0000000-0000-0000-0000-000000000001', 'c0000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000003', 'PENDING', NULL),
+  ('e0000000-0000-0000-0000-000000000002', 'c0000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-000000000002', 'b0000000-0000-0000-0000-000000000002', 'PENDING', NULL),
+  ('e0000000-0000-0000-0000-000000000003', 'c0000000-0000-0000-0000-000000000002', 'd0000000-0000-0000-0000-000000000003', 'b0000000-0000-0000-0000-000000000004', 'PENDING', NULL),
+  ('e0000000-0000-0000-0000-000000000004', 'c0000000-0000-0000-0000-000000000003', 'd0000000-0000-0000-0000-000000000004', 'b0000000-0000-0000-0000-000000000003', 'PENDING', NULL),
+  ('e0000000-0000-0000-0000-000000000005', 'c0000000-0000-0000-0000-000000000003', 'd0000000-0000-0000-0000-000000000005', 'b0000000-0000-0000-0000-000000000002', 'PENDING', NULL),
+  ('e0000000-0000-0000-0000-000000000006', 'c0000000-0000-0000-0000-000000000003', 'd0000000-0000-0000-0000-000000000006', 'b0000000-0000-0000-0000-000000000001', 'PENDING', NULL),
+  ('e0000000-0000-0000-0000-000000000007', 'c0000000-0000-0000-0000-000000000004', 'd0000000-0000-0000-0000-000000000007', 'b0000000-0000-0000-0000-000000000004', 'DELIVERED', '2026-09-08 11:30:00'),
+  ('e0000000-0000-0000-0000-000000000008', 'c0000000-0000-0000-0000-000000000005', 'd0000000-0000-0000-0000-000000000008', 'b0000000-0000-0000-0000-000000000004', 'DELIVERED', '2026-09-08 15:45:00'),
+  ('e0000000-0000-0000-0000-000000000009', 'c0000000-0000-0000-0000-000000000006', 'd0000000-0000-0000-0000-000000000009', 'b0000000-0000-0000-0000-000000000002', 'PENDING', NULL),
+  ('e0000000-0000-0000-0000-000000000010', 'c0000000-0000-0000-0000-000000000007', 'd0000000-0000-0000-0000-000000000010', 'b0000000-0000-0000-0000-000000000004', 'PENDING', NULL),
+  ('e0000000-0000-0000-0000-000000000011', 'c0000000-0000-0000-0000-000000000007', 'd0000000-0000-0000-0000-000000000011', 'b0000000-0000-0000-0000-000000000002', 'PENDING', NULL),
+  ('e0000000-0000-0000-0000-000000000012', 'c0000000-0000-0000-0000-000000000008', 'd0000000-0000-0000-0000-000000000012', 'b0000000-0000-0000-0000-000000000003', 'PENDING', NULL),
+  ('e0000000-0000-0000-0000-000000000013', 'c0000000-0000-0000-0000-000000000009', 'd0000000-0000-0000-0000-000000000013', 'b0000000-0000-0000-0000-000000000002', 'PENDING', NULL),
+  ('e0000000-0000-0000-0000-000000000014', 'c0000000-0000-0000-0000-000000000009', 'd0000000-0000-0000-0000-000000000014', 'b0000000-0000-0000-0000-000000000001', 'PENDING', NULL),
+  ('e0000000-0000-0000-0000-000000000015', 'c0000000-0000-0000-0000-000000000010', 'd0000000-0000-0000-0000-000000000015', 'b0000000-0000-0000-0000-000000000003', 'PENDING', NULL);
+
+-- Entregas previas de ejemplo para estadísticas
+INSERT INTO deliveries (id, guardian_id, delivered_by, notes, delivered_at) VALUES
+  ('f0000000-0000-0000-0000-000000000001', 'c0000000-0000-0000-0000-000000000004', 'a0000000-0000-0000-0000-000000000002', 'Entrega regular en terreno', '2026-09-08 11:30:00'),
+  ('f0000000-0000-0000-0000-000000000002', 'c0000000-0000-0000-0000-000000000005', 'a0000000-0000-0000-0000-000000000002', 'Entrega regular en terreno', '2026-09-08 15:45:00');
+
+INSERT INTO delivery_items (delivery_id, beneficiary_benefit_id) VALUES
+  ('f0000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000007'),
+  ('f0000000-0000-0000-0000-000000000002', 'e0000000-0000-0000-0000-000000000008');

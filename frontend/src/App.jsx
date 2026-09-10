@@ -1,37 +1,40 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Navbar from './components/Navbar';
 import LoginPage from './pages/LoginPage';
 import TerrenoView from './pages/TerrenoView';
 import AdminDashboardPage from './pages/AdminDashboardPage';
 import AdminBeneficiariosPage from './pages/AdminBeneficiariosPage';
 import UploadPage from './pages/UploadPage';
+import { apiService } from './services/apiService';
 
 export default function App() {
-  // Estado de usuario autenticado
-  const [user, setUser] = useState({
-    name: 'Funcionario Terreno',
-    email: 'terreno.social@quilpue.cl',
-    role: 'terreno', // 'terreno' | 'admin'
+  // Estado de usuario autenticado obtenido del almacenamiento local
+  const [user, setUser] = useState(() => apiService.getCurrentUser());
+
+  // Pestaña activa: Dashboard para administradores, Terreno para agentes de campo
+  const [currentTab, setCurrentTab] = useState(() => {
+    const initialUser = apiService.getCurrentUser();
+    return initialUser?.role === 'ADMIN' ? 'dashboard' : 'terreno';
   });
 
-  // Pestaña activa
-  const [currentTab, setCurrentTab] = useState('terreno');
-
-  // Modo simulador de marco de teléfono para pruebas de interfaz móvil en PC
+  // Modo simulador de marco de smartphone para pruebas de diseño móvil
   const [isMobileFrame, setIsMobileFrame] = useState(false);
 
   function handleLogin(loggedUser) {
     setUser(loggedUser);
-    setCurrentTab(loggedUser.role === 'admin' ? 'dashboard' : 'terreno');
+    setCurrentTab(loggedUser.role === 'ADMIN' ? 'dashboard' : 'terreno');
   }
 
   function handleLogout() {
+    apiService.logout();
     setUser(null);
   }
 
   if (!user) {
     return <LoginPage onLogin={handleLogin} />;
   }
+
+  const isAdmin = user.role === 'ADMIN';
 
   return (
     <div className={`app-root ${isMobileFrame ? 'simulated-mode' : ''}`}>
@@ -54,11 +57,11 @@ export default function App() {
               </div>
               <div className="phone-screen-content">
                 {currentTab === 'terreno' && <TerrenoView />}
-                {currentTab === 'dashboard' && <AdminDashboardPage />}
-                {currentTab === 'beneficiarios' && (
+                {isAdmin && currentTab === 'dashboard' && <AdminDashboardPage />}
+                {isAdmin && currentTab === 'beneficiarios' && (
                   <AdminBeneficiariosPage onOpenImportModal={() => setCurrentTab('upload')} />
                 )}
-                {currentTab === 'upload' && (
+                {isAdmin && currentTab === 'upload' && (
                   <UploadPage onUploadFinished={() => setCurrentTab('beneficiarios')} />
                 )}
               </div>
@@ -68,11 +71,11 @@ export default function App() {
         ) : (
           <div className="standard-view-wrapper">
             {currentTab === 'terreno' && <TerrenoView />}
-            {currentTab === 'dashboard' && <AdminDashboardPage />}
-            {currentTab === 'beneficiarios' && (
+            {isAdmin && currentTab === 'dashboard' && <AdminDashboardPage />}
+            {isAdmin && currentTab === 'beneficiarios' && (
               <AdminBeneficiariosPage onOpenImportModal={() => setCurrentTab('upload')} />
             )}
-            {currentTab === 'upload' && (
+            {isAdmin && currentTab === 'upload' && (
               <UploadPage onUploadFinished={() => setCurrentTab('beneficiarios')} />
             )}
           </div>
