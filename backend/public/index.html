@@ -1,0 +1,1175 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  />
+
+  <title>Gestión de Beneficios Sociales</title>
+
+  <style>
+    :root {
+      --primary: #1d4ed8;
+      --primary-dark: #1e3a8a;
+      --success: #15803d;
+      --danger: #dc2626;
+      --warning: #b45309;
+      --background: #f1f5f9;
+      --card: #ffffff;
+      --text: #1e293b;
+      --muted: #64748b;
+      --border: #cbd5e1;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--background);
+      color: var(--text);
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    header {
+      background: var(--primary-dark);
+      color: white;
+      padding: 16px 22px;
+    }
+
+    .header-content {
+      max-width: 1100px;
+      margin: auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 15px;
+      flex-wrap: wrap;
+    }
+
+    header h1 {
+      font-size: 20px;
+      margin: 0;
+    }
+
+    #sessionInfo {
+      font-size: 14px;
+    }
+
+    nav {
+      background: white;
+      border-bottom: 1px solid var(--border);
+      padding: 10px;
+    }
+
+    .nav-content {
+      max-width: 1100px;
+      margin: auto;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    nav button {
+      width: auto;
+      margin: 0;
+      background: #e2e8f0;
+      color: #1e293b;
+    }
+
+    nav button:hover,
+    nav button.active {
+      background: var(--primary);
+      color: white;
+    }
+
+    main {
+      max-width: 1100px;
+      margin: auto;
+      padding: 25px 16px;
+    }
+
+    .card {
+      background: var(--card);
+      padding: 24px;
+      border-radius: 10px;
+      box-shadow: 0 3px 12px rgba(15, 23, 42, 0.1);
+      margin-bottom: 20px;
+    }
+
+    h2 {
+      margin-top: 0;
+      font-size: 22px;
+    }
+
+    h3 {
+      margin-bottom: 8px;
+    }
+
+    label {
+      display: block;
+      margin-top: 15px;
+      margin-bottom: 6px;
+      font-weight: bold;
+    }
+
+    input,
+    textarea {
+      width: 100%;
+      padding: 11px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 15px;
+    }
+
+    textarea {
+      min-height: 90px;
+      resize: vertical;
+    }
+
+    button {
+      width: 100%;
+      border: 0;
+      border-radius: 6px;
+      padding: 11px 15px;
+      margin-top: 18px;
+      background: var(--primary);
+      color: white;
+      font-size: 15px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    button:hover {
+      opacity: 0.92;
+    }
+
+    button.secondary {
+      background: #475569;
+    }
+
+    button.danger {
+      background: var(--danger);
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .message {
+      margin-top: 18px;
+      padding: 14px;
+      border-radius: 6px;
+      border-left: 5px solid #64748b;
+      background: #e2e8f0;
+      white-space: pre-line;
+    }
+
+    .message.success {
+      border-left-color: var(--success);
+      background: #dcfce7;
+    }
+
+    .message.error {
+      border-left-color: var(--danger);
+      background: #fee2e2;
+    }
+
+    .message.info {
+      border-left-color: var(--primary);
+      background: #dbeafe;
+    }
+
+    .benefit {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 13px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      margin: 10px 0;
+    }
+
+    .benefit input {
+      width: auto;
+      margin-top: 5px;
+    }
+
+    .benefit.delivered {
+      opacity: 0.7;
+      background: #f8fafc;
+    }
+
+    .pending {
+      color: var(--warning);
+      font-weight: bold;
+    }
+
+    .delivered {
+      color: var(--success);
+      font-weight: bold;
+    }
+
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 14px;
+      margin-top: 16px;
+    }
+
+    .kpi {
+      border: 1px solid var(--border);
+      padding: 18px;
+      border-radius: 8px;
+      background: #f8fafc;
+    }
+
+    .kpi-title {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .kpi-value {
+      margin-top: 8px;
+      color: var(--primary-dark);
+      font-size: 28px;
+      font-weight: bold;
+    }
+
+    .small {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .two-columns {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+    }
+
+    .evidence-image {
+      display: block;
+      width: 100%;
+      max-height: 360px;
+      margin-top: 15px;
+      object-fit: contain;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+    }
+
+    ul {
+      margin-bottom: 0;
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <div class="header-content">
+      <h1>Gestión de Beneficios Sociales — Entorno de Prueba</h1>
+      <div id="sessionInfo">No has iniciado sesión.</div>
+    </div>
+  </header>
+
+  <nav id="topMenu" class="hidden">
+    <div class="nav-content">
+      <button data-section="homeSection" class="navButton active">
+        Inicio
+      </button>
+
+      <button
+        data-section="importSection"
+        class="navButton adminOnly"
+      >
+        Importar Excel
+      </button>
+
+      <button
+        data-section="searchSection"
+        class="navButton"
+      >
+        Buscar RUT
+      </button>
+
+      <button
+        data-section="dashboardSection"
+        class="navButton adminOnly"
+      >
+        Dashboard
+      </button>
+
+      <button id="logoutButton" class="danger">
+        Cerrar sesión
+      </button>
+    </div>
+  </nav>
+
+  <main>
+    <!-- ================================================= -->
+    <!-- LOGIN                                             -->
+    <!-- ================================================= -->
+    <section id="loginSection" class="card">
+      <h2>Iniciar sesión</h2>
+
+      <p class="small">
+        Esta versión funciona en entorno local. El inicio de sesión permite
+        diferenciar las acciones permitidas para administrador y funcionario
+        de terreno.
+      </p>
+
+      <div class="two-columns">
+        <div>
+          <label for="username">Usuario</label>
+          <input
+            id="username"
+            value="admin"
+            placeholder="Ejemplo: admin"
+          />
+        </div>
+
+        <div>
+          <label for="password">Contraseña</label>
+          <input
+            id="password"
+            type="password"
+            value="Admin123!"
+            placeholder="Contraseña"
+          />
+        </div>
+      </div>
+
+      <button id="loginButton">Iniciar sesión</button>
+
+      <div id="loginMessage" class="message info">
+        Usuarios de prueba:
+        Administrador: admin / Admin123!
+        Terreno: terreno / Terreno123!
+      </div>
+    </section>
+
+    <!-- ================================================= -->
+    <!-- INICIO                                            -->
+    <!-- ================================================= -->
+    <section id="homeSection" class="card appSection hidden">
+      <h2>Inicio</h2>
+
+      <p id="welcomeText">
+        Selecciona una opción desde el menú superior.
+      </p>
+
+      <div class="message info">
+        Flujo de prueba:
+        1. Inicia sesión como administrador.
+        2. Importa un Excel de beneficiarios.
+        3. Busca un RUT de apoderado importado.
+        4. Selecciona beneficios pendientes.
+        5. Adjunta o toma una foto del acta.
+        6. Confirma la entrega.
+      </div>
+    </section>
+
+    <!-- ================================================= -->
+    <!-- IMPORTAR EXCEL                                    -->
+    <!-- ================================================= -->
+    <section id="importSection" class="card appSection hidden">
+      <h2>Importar beneficiarios desde Excel</h2>
+
+      <p class="small">
+        Esta opción importa los registros del Excel hacia PostgreSQL local.
+        Se importan solamente las filas cuyo campo
+        <strong>Estado</strong> sea <strong>Aprobado</strong>.
+        El valor de <strong>FIBE_Beneficiado</strong> se almacena como
+        información referencial, pero no determina si el registro se importa.
+      </p>
+
+      <p class="small">
+        Los RUT se almacenan usando formato normalizado, sin puntos:
+        <strong>12345678-9</strong>. Durante esta etapa de prueba se acepta
+        un RUT con formato correcto aunque el dígito verificador del Excel
+        presente una inconsistencia; el sistema mostrará una advertencia.
+      </p>
+
+      <p class="small">
+        Columnas utilizadas:
+        Rut_Apoderado, Nombre_Apoderado, Apellido_Paterno_Apoderado,
+        Apellido_Materno_Apoderado, Fecha_Nacimiento_Apoderado, Direccion,
+        Sector, Correo_Apoderado, Telefono_Apoderado, Nombre_Alumno,
+        Apellido_Paterno_Alumno, Apellido_Materno_Alumno, Rut_Alumno,
+        FIBE_Beneficiado, Renovacion_automatica, Establecimiento,
+        Nivel_Educacional, Estado, Fecha_Postulacion, dia, hora, mesa,
+        Fecha_entrega y entregado_por.
+      </p>
+
+      <label for="excelFile">Archivo Excel</label>
+      <input
+        id="excelFile"
+        type="file"
+        accept=".xlsx,.xls"
+      />
+
+      <button id="importButton">
+        Importar información a la base de datos
+      </button>
+
+      <div id="importMessage" class="message info">
+        Aún no se ha seleccionado un archivo.
+      </div>
+    </section>
+
+    <!-- ================================================= -->
+    <!-- BUSCAR RUT                                        -->
+    <!-- ================================================= -->
+    <section id="searchSection" class="card appSection hidden">
+      <h2>Buscar beneficiario por RUT de apoderado</h2>
+
+      <p class="small">
+        Busca únicamente RUT de apoderados que hayan sido cargados desde el
+        Excel.
+      </p>
+
+      <label for="guardianRut">RUT del apoderado</label>
+      <input
+        id="guardianRut"
+        placeholder="Ejemplo: 12.345.678-5"
+      />
+
+      <button id="searchButton">
+        Buscar beneficios
+      </button>
+
+      <div id="searchMessage" class="message info">
+        Ingresa el RUT del apoderado y presiona “Buscar beneficios”.
+      </div>
+
+      <div id="benefitsContainer" class="hidden">
+        <h3 id="guardianName"></h3>
+        <p id="guardianRutText" class="small"></p>
+
+        <h3>Beneficios asociados</h3>
+
+        <div id="benefitsList"></div>
+
+        <div id="deliveryArea" class="hidden">
+          <h3>Registrar entrega</h3>
+
+          <p class="small">
+            Selecciona uno o más beneficios pendientes. Al confirmar, estos
+            cambiarán a estado <strong>ENTREGADO</strong>.
+          </p>
+
+          <label for="customFileLabel">
+            Nombre adicional del acta
+          </label>
+
+          <input
+            id="customFileLabel"
+            value="entrega"
+            placeholder="Ejemplo: entrega-mesa-4"
+          />
+
+          <p class="small">
+            Nombre lógico generado:
+            <strong>acta-RUT-FECHA-nombre-adicional.jpg</strong>
+          </p>
+
+          <label for="deliveryNotes">Observaciones</label>
+
+          <textarea
+            id="deliveryNotes"
+            placeholder="Ejemplo: Entrega realizada correctamente en Mesa 4."
+          ></textarea>
+
+          <label for="actaFile">Fotografía del acta firmada</label>
+
+          <input
+            id="actaFile"
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            capture="environment"
+          />
+
+          <button id="deliveryButton">
+            Confirmar entrega y guardar acta
+          </button>
+
+          <div id="deliveryMessage" class="message info">
+            Selecciona beneficios pendientes y adjunta la fotografía del acta.
+          </div>
+
+          <img
+            id="evidencePreview"
+            class="evidence-image hidden"
+            alt="Vista previa del acta registrada"
+          />
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================= -->
+    <!-- DASHBOARD                                         -->
+    <!-- ================================================= -->
+    <section id="dashboardSection" class="card appSection hidden">
+      <h2>Dashboard administrativo</h2>
+
+      <p class="small">
+        Los indicadores muestran información global. Esta sección está
+        disponible solamente para administradores.
+      </p>
+
+      <button id="loadKpisButton">
+        Actualizar indicadores
+      </button>
+
+      <div id="dashboardMessage" class="message info">
+        Presiona “Actualizar indicadores” para cargar los datos.
+      </div>
+
+      <div id="kpiGrid" class="kpi-grid hidden">
+        <div class="kpi">
+          <div class="kpi-title">Apoderados</div>
+          <div id="kpiGuardians" class="kpi-value">0</div>
+        </div>
+
+        <div class="kpi">
+          <div class="kpi-title">Alumnos</div>
+          <div id="kpiStudents" class="kpi-value">0</div>
+        </div>
+
+        <div class="kpi">
+          <div class="kpi-title">Beneficios totales</div>
+          <div id="kpiTotalBenefits" class="kpi-value">0</div>
+        </div>
+
+        <div class="kpi">
+          <div class="kpi-title">Pendientes</div>
+          <div id="kpiPending" class="kpi-value">0</div>
+        </div>
+
+        <div class="kpi">
+          <div class="kpi-title">Entregados</div>
+          <div id="kpiDelivered" class="kpi-value">0</div>
+        </div>
+
+        <div class="kpi">
+          <div class="kpi-title">Entregas de hoy</div>
+          <div id="kpiToday" class="kpi-value">0</div>
+        </div>
+
+        <div class="kpi">
+          <div class="kpi-title">Avance de entrega</div>
+          <div id="kpiPercentage" class="kpi-value">0%</div>
+        </div>
+      </div>
+
+      <button id="downloadCsvButton" class="secondary">
+        Descargar CSV anonimizado
+      </button>
+    </section>
+  </main>
+
+  <script>
+    let authToken = localStorage.getItem("beneficios_token");
+    let currentUser = JSON.parse(
+      localStorage.getItem("beneficios_user") || "null"
+    );
+
+    let currentGuardianRut = null;
+
+    const loginSection = document.getElementById("loginSection");
+    const topMenu = document.getElementById("topMenu");
+    const sessionInfo = document.getElementById("sessionInfo");
+
+    const loginMessage = document.getElementById("loginMessage");
+    const importMessage = document.getElementById("importMessage");
+    const searchMessage = document.getElementById("searchMessage");
+    const deliveryMessage = document.getElementById("deliveryMessage");
+    const dashboardMessage = document.getElementById("dashboardMessage");
+
+    const benefitsContainer = document.getElementById("benefitsContainer");
+    const benefitsList = document.getElementById("benefitsList");
+    const deliveryArea = document.getElementById("deliveryArea");
+    const evidencePreview = document.getElementById("evidencePreview");
+
+    function setMessage(element, type, message) {
+      element.className = `message ${type}`;
+      element.textContent = message;
+    }
+
+    function authHeaders(isJson = false) {
+      const headers = {
+        Authorization: `Bearer ${authToken}`
+      };
+
+      if (isJson) {
+        headers["Content-Type"] = "application/json";
+      }
+
+      return headers;
+    }
+
+    function showSection(sectionId) {
+      document.querySelectorAll(".appSection").forEach((section) => {
+        section.classList.add("hidden");
+      });
+
+      document.getElementById(sectionId).classList.remove("hidden");
+
+      document.querySelectorAll(".navButton").forEach((button) => {
+        button.classList.remove("active");
+
+        if (button.dataset.section === sectionId) {
+          button.classList.add("active");
+        }
+      });
+    }
+
+    function applyRolePermissions() {
+      if (!currentUser) {
+        return;
+      }
+
+      const isAdmin = currentUser.role === "ADMIN";
+
+      document.querySelectorAll(".adminOnly").forEach((element) => {
+        element.classList.toggle("hidden", !isAdmin);
+      });
+
+      sessionInfo.textContent =
+        `Sesión activa: ${currentUser.username} (${currentUser.role})`;
+
+      document.getElementById("welcomeText").textContent =
+        isAdmin
+          ? `Bienvenido/a ${currentUser.username}. Puedes importar Excel, buscar beneficiarios, registrar entregas y revisar indicadores.`
+          : `Bienvenido/a ${currentUser.username}. Puedes buscar beneficiarios y registrar entregas.`;
+    }
+
+    function initializeSession() {
+      if (!authToken || !currentUser) {
+        return;
+      }
+
+      loginSection.classList.add("hidden");
+      topMenu.classList.remove("hidden");
+
+      applyRolePermissions();
+      showSection("homeSection");
+    }
+
+    async function handleLogin() {
+      const username = document.getElementById("username").value.trim();
+      const password = document.getElementById("password").value;
+
+      setMessage(loginMessage, "info", "Validando credenciales...");
+
+      try {
+        const response = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            username,
+            password
+          })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          setMessage(loginMessage, "error", data.message);
+          return;
+        }
+
+        authToken = data.token;
+        currentUser = data.user;
+
+        localStorage.setItem("beneficios_token", authToken);
+        localStorage.setItem(
+          "beneficios_user",
+          JSON.stringify(currentUser)
+        );
+
+        setMessage(loginMessage, "success", data.message);
+
+        loginSection.classList.add("hidden");
+        topMenu.classList.remove("hidden");
+
+        applyRolePermissions();
+        showSection("homeSection");
+      } catch (error) {
+        setMessage(
+          loginMessage,
+          "error",
+          "No fue posible conectar con el backend local."
+        );
+      }
+    }
+
+    function logout() {
+      localStorage.removeItem("beneficios_token");
+      localStorage.removeItem("beneficios_user");
+
+      authToken = null;
+      currentUser = null;
+      currentGuardianRut = null;
+
+      location.reload();
+    }
+
+    async function importExcel() {
+      const fileInput = document.getElementById("excelFile");
+
+      if (!fileInput.files[0]) {
+        setMessage(
+          importMessage,
+          "error",
+          "Debes seleccionar un archivo Excel antes de importar."
+        );
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append("excel", fileInput.files[0]);
+
+      setMessage(
+        importMessage,
+        "info",
+        "Importando información a PostgreSQL local. Esto puede tardar unos segundos..."
+      );
+
+      try {
+        const response = await fetch(
+          "/api/imports/beneficiaries",
+          {
+            method: "POST",
+            headers: authHeaders(false),
+            body: formData
+          }
+        );
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          setMessage(
+            importMessage,
+            "error",
+            data.message || "No fue posible importar el archivo."
+          );
+          return;
+        }
+
+        let text =
+          `Importación exitosa.\n\n` +
+          `Filas procesadas: ${data.totalRows}\n` +
+          `Filas importadas: ${data.importedRows}\n` +
+          `Filas rechazadas: ${data.rejectedRows}`;
+
+        if (data.warnings && data.warnings.length > 0) {
+          text +=
+            `\n\nAdvertencias de RUT: ${data.warnings.length}` +
+            `\nLas filas se importaron, pero algunos dígitos verificadores no coinciden con el cálculo.`;
+
+          data.warnings.slice(0, 5).forEach((warning) => {
+            text += `\n• Fila ${warning.row}: ${warning.message}`;
+          });
+
+          if (data.warnings.length > 5) {
+            text += `\n• Se omitieron ${data.warnings.length - 5} advertencias adicionales en esta vista.`;
+          }
+        }
+
+        if (data.errors && data.errors.length > 0) {
+          text += "\n\nPrimeros errores detectados:";
+
+          data.errors.slice(0, 8).forEach((error) => {
+            text += `\n• Fila ${error.row}: ${error.message}`;
+          });
+
+          if (data.errors.length > 8) {
+            text += `\n• Se omitieron ${data.errors.length - 8} errores adicionales en esta vista.`;
+          }
+        }
+
+        setMessage(importMessage, "success", text);
+      } catch {
+        setMessage(
+          importMessage,
+          "error",
+          "No fue posible conectar con el backend local."
+        );
+      }
+    }
+
+    function renderBenefits(benefits) {
+      benefitsList.innerHTML = "";
+
+      const pendingBenefits = benefits.filter(
+        (benefit) => benefit.status === "PENDING"
+      );
+
+      benefits.forEach((benefit) => {
+        const isPending = benefit.status === "PENDING";
+
+        const element = document.createElement("div");
+
+        element.className =
+          `benefit ${isPending ? "" : "delivered"}`;
+
+        element.innerHTML = `
+          ${
+            isPending
+              ? `<input
+                   type="checkbox"
+                   class="benefitCheckbox"
+                   value="${benefit.benefitId}"
+                 />`
+              : `<input type="checkbox" disabled />`
+          }
+
+          <div>
+            <strong>${benefit.benefitName}</strong><br>
+            Alumno/a: ${benefit.student.fullName}<br>
+            Nivel: ${benefit.student.educationalLevel || "No informado"}<br>
+            Establecimiento: ${benefit.student.establishment || "No informado"}<br>
+            Estado:
+            ${
+              isPending
+                ? `<span class="pending">PENDIENTE</span>`
+                : `<span class="delivered">ENTREGADO</span>`
+            }
+          </div>
+        `;
+
+        benefitsList.appendChild(element);
+      });
+
+      deliveryArea.classList.toggle(
+        "hidden",
+        pendingBenefits.length === 0
+      );
+
+      if (pendingBenefits.length === 0) {
+        setMessage(
+          deliveryMessage,
+          "info",
+          "Este apoderado no tiene beneficios pendientes de entrega."
+        );
+      }
+    }
+
+    async function searchGuardian() {
+      const rut = document.getElementById("guardianRut").value.trim();
+
+      if (!rut) {
+        setMessage(
+          searchMessage,
+          "error",
+          "Debes ingresar el RUT del apoderado."
+        );
+        return;
+      }
+
+      setMessage(searchMessage, "info", "Buscando beneficiario...");
+
+      benefitsContainer.classList.add("hidden");
+      evidencePreview.classList.add("hidden");
+
+      try {
+        const response = await fetch(
+          `/api/guardians/${encodeURIComponent(rut)}`,
+          {
+            headers: authHeaders(false)
+          }
+        );
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          setMessage(searchMessage, "error", data.message);
+          return;
+        }
+
+        currentGuardianRut = data.guardian.rut;
+
+        document.getElementById("guardianName").textContent =
+          data.guardian.fullName;
+
+        document.getElementById("guardianRutText").textContent =
+          `RUT: ${data.guardian.rut}`;
+
+        renderBenefits(data.benefits);
+
+        benefitsContainer.classList.remove("hidden");
+
+        setMessage(
+          searchMessage,
+          "success",
+          "Beneficiario encontrado. Revisa sus beneficios asociados."
+        );
+      } catch {
+        setMessage(
+          searchMessage,
+          "error",
+          "No fue posible conectar con el backend local."
+        );
+      }
+    }
+
+    async function showEvidence(evidenceId) {
+      try {
+        const response = await fetch(
+          `/api/evidences/${evidenceId}/file`,
+          {
+            headers: authHeaders(false)
+          }
+        );
+
+        if (!response.ok) {
+          return;
+        }
+
+        const imageBlob = await response.blob();
+        const imageUrl = URL.createObjectURL(imageBlob);
+
+        evidencePreview.src = imageUrl;
+        evidencePreview.classList.remove("hidden");
+      } catch {
+        // La entrega se registró; la vista previa es secundaria.
+      }
+    }
+
+    async function registerDelivery() {
+      const selectedBenefits = Array.from(
+        document.querySelectorAll(".benefitCheckbox:checked")
+      ).map((checkbox) => checkbox.value);
+
+      const actaFile = document.getElementById("actaFile").files[0];
+
+      if (selectedBenefits.length === 0) {
+        setMessage(
+          deliveryMessage,
+          "error",
+          "Debes seleccionar al menos un beneficio pendiente."
+        );
+        return;
+      }
+
+      if (!actaFile) {
+        setMessage(
+          deliveryMessage,
+          "error",
+          "Debes adjuntar o capturar la fotografía del acta firmada."
+        );
+        return;
+      }
+
+      const formData = new FormData();
+
+      formData.append("rut", currentGuardianRut);
+      formData.append("benefitIds", JSON.stringify(selectedBenefits));
+      formData.append(
+        "customFileLabel",
+        document.getElementById("customFileLabel").value
+      );
+      formData.append(
+        "notes",
+        document.getElementById("deliveryNotes").value
+      );
+      formData.append("acta", actaFile);
+
+      setMessage(
+        deliveryMessage,
+        "info",
+        "Registrando entrega y guardando fotografía del acta..."
+      );
+
+      try {
+        const response = await fetch(
+          "/api/deliveries/register",
+          {
+            method: "POST",
+            headers: authHeaders(false),
+            body: formData
+          }
+        );
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          setMessage(deliveryMessage, "error", data.message);
+          return;
+        }
+
+        let text =
+          `${data.message}\n\n` +
+          `Fecha de entrega: ${new Date(
+            data.delivery.deliveredAt
+          ).toLocaleString()}\n` +
+          `Nombre lógico del acta: ${data.evidence.logicalFileName}\n\n` +
+          `Beneficios entregados:`;
+
+        data.deliveredBenefits.forEach((benefit) => {
+          text += `\n• ${benefit.studentName} — ${benefit.benefitName}`;
+        });
+
+        setMessage(deliveryMessage, "success", text);
+
+        document.getElementById("actaFile").value = "";
+        document.getElementById("deliveryNotes").value = "";
+
+        await showEvidence(data.evidence.id);
+
+        // Recarga la información para mostrar beneficios como ENTREGADOS.
+        await searchGuardian();
+      } catch {
+        setMessage(
+          deliveryMessage,
+          "error",
+          "No fue posible conectar con el backend local."
+        );
+      }
+    }
+
+    async function loadKpis() {
+      setMessage(
+        dashboardMessage,
+        "info",
+        "Cargando indicadores..."
+      );
+
+      try {
+        const response = await fetch("/api/reports/kpis", {
+          headers: authHeaders(false)
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          setMessage(dashboardMessage, "error", data.message);
+          return;
+        }
+
+        const kpis = data.kpis;
+
+        document.getElementById("kpiGuardians").textContent =
+          kpis.totalGuardians;
+
+        document.getElementById("kpiStudents").textContent =
+          kpis.totalStudents;
+
+        document.getElementById("kpiTotalBenefits").textContent =
+          kpis.totalBenefits;
+
+        document.getElementById("kpiPending").textContent =
+          kpis.pendingBenefits;
+
+        document.getElementById("kpiDelivered").textContent =
+          kpis.deliveredBenefits;
+
+        document.getElementById("kpiToday").textContent =
+          kpis.deliveriesToday;
+
+        document.getElementById("kpiPercentage").textContent =
+          `${kpis.deliveryPercentage}%`;
+
+        document.getElementById("kpiGrid").classList.remove("hidden");
+
+        setMessage(
+          dashboardMessage,
+          "success",
+          "Indicadores actualizados correctamente."
+        );
+      } catch {
+        setMessage(
+          dashboardMessage,
+          "error",
+          "No fue posible conectar con el backend local."
+        );
+      }
+    }
+
+    async function downloadCsv() {
+      try {
+        const response = await fetch(
+          "/api/reports/transparency.csv",
+          {
+            headers: authHeaders(false)
+          }
+        );
+
+        if (!response.ok) {
+          const data = await response.json();
+
+          setMessage(
+            dashboardMessage,
+            "error",
+            data.message || "No fue posible descargar el reporte."
+          );
+
+          return;
+        }
+
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+
+        const link = document.createElement("a");
+
+        link.href = url;
+        link.download = "reporte-transparencia.csv";
+
+        document.body.appendChild(link);
+        link.click();
+
+        link.remove();
+        URL.revokeObjectURL(url);
+
+        setMessage(
+          dashboardMessage,
+          "success",
+          "Reporte CSV anonimizado descargado correctamente."
+        );
+      } catch {
+        setMessage(
+          dashboardMessage,
+          "error",
+          "No fue posible descargar el reporte."
+        );
+      }
+    }
+
+    // Eventos
+    document.getElementById("loginButton")
+      .addEventListener("click", handleLogin);
+
+    document.getElementById("logoutButton")
+      .addEventListener("click", logout);
+
+    document.getElementById("importButton")
+      .addEventListener("click", importExcel);
+
+    document.getElementById("searchButton")
+      .addEventListener("click", searchGuardian);
+
+    document.getElementById("deliveryButton")
+      .addEventListener("click", registerDelivery);
+
+    document.getElementById("loadKpisButton")
+      .addEventListener("click", loadKpis);
+
+    document.getElementById("downloadCsvButton")
+      .addEventListener("click", downloadCsv);
+
+    document.querySelectorAll(".navButton").forEach((button) => {
+      button.addEventListener("click", () => {
+        showSection(button.dataset.section);
+      });
+    });
+
+    initializeSession();
+  </script>
+</body>
+</html>
