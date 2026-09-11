@@ -1034,6 +1034,18 @@ app.post("/apis/upload-excel", (req, res, next) => {
   return app._router.handle(req, res, next);
 });
 
+// Fallback SPA para servir el frontend de React/PWA si está compilado en public/
+app.get("*", (req, res, next) => {
+  if (req.path.startsWith("/api") || req.path.startsWith("/apis") || req.path.startsWith("/fotoss")) {
+    return next();
+  }
+  const indexPath = path.join(__dirname, "public", "index.html");
+  if (fs.existsSync(indexPath)) {
+    return res.sendFile(indexPath);
+  }
+  return next();
+});
+
 // Manejo global de errores
 app.use((error, req, res, next) => {
   if (error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE") {

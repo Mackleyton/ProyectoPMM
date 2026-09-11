@@ -3,6 +3,9 @@ import { cleanRut } from '../utils/rutUtils';
 const TOKEN_KEY = 'beneficios_token';
 const USER_KEY = 'beneficios_user';
 
+// Soporte para URL base del backend si se despliega en Render con front y back separados
+export const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+
 export const authStorage = {
   getToken() {
     return localStorage.getItem(TOKEN_KEY);
@@ -51,9 +54,9 @@ export const apiService = {
    */
   async isBackendAvailable() {
     try {
-      const res = await fetch('/api/health', {
+      const res = await fetch(`${API_BASE}/api/health`, {
         method: 'GET',
-        signal: AbortSignal.timeout(2000),
+        signal: AbortSignal.timeout(3000),
       });
       return res.ok;
     } catch {
@@ -65,7 +68,7 @@ export const apiService = {
    * Iniciar sesión en el backend con credenciales reales (admin o terreno)
    */
   async login(username, password) {
-    const res = await fetch('/api/auth/login', {
+    const res = await fetch(`${API_BASE}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
@@ -108,7 +111,7 @@ export const apiService = {
     const rutLimpio = cleanRut(rutIngresado);
     if (!rutLimpio) throw new Error('Debe ingresar un RUT válido');
 
-    const res = await fetch(`/api/guardians/${encodeURIComponent(rutLimpio)}`, {
+    const res = await fetch(`${API_BASE}/api/guardians/${encodeURIComponent(rutLimpio)}`, {
       method: 'GET',
       headers: getAuthHeaders(),
     });
@@ -155,7 +158,7 @@ export const apiService = {
       formData.append('acta', actaFile);
     }
 
-    const res = await fetch('/api/deliveries/register', {
+    const res = await fetch(`${API_BASE}/api/deliveries/register`, {
       method: 'POST',
       headers: getAuthHeaders(false),
       body: formData,
@@ -174,7 +177,7 @@ export const apiService = {
    * Obtiene indicadores y métricas de gestión en tiempo real
    */
   async obtenerKpis() {
-    const res = await fetch('/api/reports/kpis', {
+    const res = await fetch(`${API_BASE}/api/reports/kpis`, {
       method: 'GET',
       headers: getAuthHeaders(),
     });
@@ -206,7 +209,7 @@ export const apiService = {
     if (search) query.append('search', search);
     if (estado && estado !== 'TODOS') query.append('estado', estado);
 
-    const res = await fetch(`/api/beneficiaries?${query.toString()}`, {
+    const res = await fetch(`${API_BASE}/api/beneficiaries?${query.toString()}`, {
       method: 'GET',
       headers: getAuthHeaders(),
     });
@@ -229,7 +232,7 @@ export const apiService = {
     const formData = new FormData();
     formData.append('excel', file);
 
-    const res = await fetch('/api/imports/beneficiaries', {
+    const res = await fetch(`${API_BASE}/api/imports/beneficiaries`, {
       method: 'POST',
       headers: getAuthHeaders(false),
       body: formData,
@@ -248,7 +251,7 @@ export const apiService = {
    * Descarga el reporte CSV anonimizado para la Ley de Transparencia (21.180)
    */
   async exportarTransparenciaCSV() {
-    const res = await fetch('/api/reports/transparency.csv', {
+    const res = await fetch(`${API_BASE}/api/reports/transparency.csv`, {
       method: 'GET',
       headers: getAuthHeaders(),
     });
