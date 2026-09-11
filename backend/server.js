@@ -142,26 +142,23 @@ function createToken(user) {
 // =========================================================
 
 let usePostgres = false;
+const poolConfig = process.env.DATABASE_URL
+  ? {
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+      connectionTimeoutMillis: 5000,
+    }
+  : {
+      host: process.env.DB_HOST || "localhost",
+      port: Number(process.env.DB_PORT || 5432),
+      database: process.env.DB_NAME || "beneficios_db",
+      user: process.env.DB_USER || "postgres",
+      password: process.env.DB_PASSWORD || "postgres",
+      ssl: process.env.DB_SSL === "true" ? { rejectUnauthorized: false } : false,
+      connectionTimeoutMillis: 3000,
+    };
 
-// Configuración de conexión compatible con Render PostgreSQL (DATABASE_URL con SSL) o Local
-const connectionString = process.env.DATABASE_URL;
-const pool = new Pool(
-  connectionString
-    ? {
-        connectionString,
-        ssl: { rejectUnauthorized: false },
-        connectionTimeoutMillis: 10000,
-      }
-    : {
-        host: process.env.DB_HOST || "localhost",
-        port: Number(process.env.DB_PORT || 5432),
-        database: process.env.DB_NAME || "beneficios_db",
-        user: process.env.DB_USER || "postgres",
-        password: process.env.DB_PASSWORD || "postgres",
-        ssl: process.env.DB_SSL === "true" ? { rejectUnauthorized: false } : false,
-        connectionTimeoutMillis: 3000,
-      }
-);
+const pool = new Pool(poolConfig);
 
 // Almacén en memoria para cuando PostgreSQL no esté en ejecución
 const memoryStore = {
@@ -258,7 +255,7 @@ loadSeedDataToMemory();
 async function initDatabase() {
   try {
     const client = await pool.connect();
-    console.log("[DB] ¡Conectado exitosamente a PostgreSQL (Render/Local)!");
+    console.log("[DB] ¡Conectado exitosamente a PostgreSQL!");
     usePostgres = true;
 
     // Ejecutar init.sql para crear tablas si no existen
@@ -269,11 +266,15 @@ async function initDatabase() {
       console.log("[DB] Esquema DDL verificado/creado en PostgreSQL.");
     }
 
-    // Migraciones automáticas seguras para soporte de fotos de actas (BYTEA)
-    await client.query(`
-      ALTER TABLE delivery_evidences ADD COLUMN IF NOT EXISTS file_data BYTEA;
-      ALTER TABLE beneficiary_benefits ADD COLUMN IF NOT EXISTS evidence_id UUID REFERENCES delivery_evidences(id) ON DELETE SET NULL;
-    `);
+    // Migraciones seguras para columnas y restricciones
+    try {
+      await client.query(`ALTER TABLE delivery_evidences ADD COLUMN IF NOT EXISTS file_data BYTEA;`);
+      await client.query(`ALTER TABLE beneficiary_benefits ADD COLUMN IF NOT EXISTS evidence_id UUID;`);
+      await client.query(`ALTER TABLE deliveries ALTER COLUMN delivered_by DROP NOT NULL;`);
+      await client.query(`ALTER TABLE delivery_evidences DROP CONSTRAINT IF EXISTS delivery_evidences_storage_key_key;`);
+    } catch (migErr) {
+      console.warn("[DB] Aviso en migraciones automáticas:", migErr.message);
+    }
 
     // Asegurar usuarios iniciales en PostgreSQL
     const adminHash = await bcrypt.hash("Admin123!", 10);
@@ -497,16 +498,15 @@ app.get(
 
           if (guardian) {
             const bRes = await pool.query(
-              `SELECT bb.id AS benefit_id, bb.status, bb.delivered_at,
-                      COALESCE(bb.evidence_id, de.id) AS evidence_id,
+              `SELECT bb.id AS benefit_id, bb.status, bb.delivered_at, bb.evidence_id,
                       bt.name AS benefit_name,
                       s.rut AS student_rut, s.first_name, s.paternal_last_name, s.maternal_last_name,
-                      s.establishment, s.educational_level
+                      s.establishment, s.educational_level,
+                      de.id AS photo_evidence_id
                FROM beneficiary_benefits bb
                JOIN benefit_types bt ON bt.id = bb.benefit_type_id
                JOIN students s ON s.id = bb.student_id
-               LEFT JOIN delivery_items di ON di.beneficiary_benefit_id = bb.id
-               LEFT JOIN delivery_evidences de ON de.delivery_id = di.delivery_id
+               LEFT JOIN delivery_evidences de ON (de.id = bb.evidence_id OR de.guardian_id = bb.guardian_id)
                WHERE bb.guardian_id = $1
                ORDER BY s.paternal_last_name, bt.name`,
               [guardian.id]
@@ -523,20 +523,23 @@ app.get(
                 email: guardian.email,
                 phone: guardian.phone,
               },
-              benefits: bRes.rows.map((b) => ({
-                benefitId: b.benefit_id,
-                benefitName: b.benefit_name,
-                status: b.status,
-                deliveredAt: b.delivered_at,
-                evidenceId: b.evidence_id,
-                fotoActa: b.evidence_id ? `/api/evidences/${b.evidence_id}/file` : null,
-                student: {
-                  rut: b.student_rut,
-                  fullName: fullName(b.first_name, b.paternal_last_name, b.maternal_last_name),
-                  establishment: b.establishment,
-                  educationalLevel: b.educational_level,
-                },
-              })),
+              benefits: bRes.rows.map((b) => {
+                const evId = b.evidence_id || b.photo_evidence_id;
+                return {
+                  benefitId: b.benefit_id,
+                  benefitName: b.benefit_name,
+                  status: b.status,
+                  deliveredAt: b.delivered_at,
+                  evidenceId: evId,
+                  fotoActa: evId ? `/api/evidences/${evId}/file` : null,
+                  student: {
+                    rut: b.student_rut,
+                    fullName: fullName(b.first_name, b.paternal_last_name, b.maternal_last_name),
+                    establishment: b.establishment,
+                    educationalLevel: b.educational_level,
+                  },
+                };
+              }),
             });
           }
         } catch (dbErr) {
@@ -656,63 +659,88 @@ app.post(
 
       const deliveryDate = new Date().toISOString();
       const deliveredBenefits = [];
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      let dbEvidenceId = null;
 
-      // Actualizar en PostgreSQL con persistencia BYTEA de la foto
-      let pgEvidenceId = null;
+      // Actualizar en PostgreSQL si está disponible
       if (usePostgres) {
         const client = await pool.connect();
         try {
           await client.query("BEGIN");
-          let gRes = await client.query("SELECT id FROM guardians WHERE rut = $1", [rutValidation.rut]);
-          let guardianId = gRes.rows[0]?.id;
 
+          let gRes = await client.query(
+            "SELECT id FROM guardians WHERE rut = $1 OR replace(replace(rut, '.', ''), '-', '') = $2 LIMIT 1",
+            [rutValidation.rut, rutValidation.clean]
+          );
+          let guardianId = gRes.rows[0]?.id;
           if (!guardianId) {
-            const cleanG = await client.query(
-              "SELECT id FROM guardians WHERE REPLACE(REPLACE(rut, '.', ''), '-', '') = $1",
-              [rutValidation.clean]
+            const sRes = await client.query(
+              "SELECT guardian_id FROM students WHERE rut = $1 OR replace(replace(rut, '.', ''), '-', '') = $2 LIMIT 1",
+              [rutValidation.rut, rutValidation.clean]
             );
-            guardianId = cleanG.rows[0]?.id;
+            guardianId = sRes.rows[0]?.guardian_id;
+          }
+
+          let deliveredByUserId = null;
+          if (req.user?.id && uuidRegex.test(req.user.id)) {
+            deliveredByUserId = req.user.id;
+          } else {
+            const uRes = await client.query("SELECT id FROM users WHERE username = $1 LIMIT 1", [req.user?.username || 'terreno']);
+            deliveredByUserId = uRes.rows[0]?.id || null;
           }
 
           const delRes = await client.query(
             `INSERT INTO deliveries (guardian_id, delivered_by, notes, delivered_at)
              VALUES ($1, $2, $3, CURRENT_TIMESTAMP) RETURNING id, delivered_at`,
-            [guardianId, req.user.id || null, cleanText(req.body.notes) || "Entrega en terreno"]
+            [guardianId, deliveredByUserId, cleanText(req.body.notes) || "Entrega en terreno"]
           );
           const deliveryId = delRes.rows[0].id;
 
-          // Guardar imagen directamente en PostgreSQL (columna file_data BYTEA)
           const evRes = await client.query(
             `INSERT INTO delivery_evidences (delivery_id, guardian_id, logical_file_name, storage_key, mime_type, file_size_bytes, file_hash_sha256, file_data)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-            [
-              deliveryId,
-              guardianId,
-              filename,
-              filename,
-              req.file.mimetype,
-              req.file.size,
-              sha256(req.file.buffer),
-              req.file.buffer, // Persistencia binaria garantizada en Render Postgres
-            ]
+            [deliveryId, guardianId, filename, `acta_${Date.now()}_${filename}`, req.file.mimetype, req.file.size, sha256(req.file.buffer), req.file.buffer]
           );
-          pgEvidenceId = evRes.rows[0].id;
+          dbEvidenceId = evRes.rows[0].id;
 
           for (const bId of benefitIds) {
-            // Relacionar entrega con el beneficio en delivery_items
-            await client.query(
-              `INSERT INTO delivery_items (delivery_id, beneficiary_benefit_id)
-               VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-              [deliveryId, bId]
-            );
+            if (uuidRegex.test(bId)) {
+              await client.query(
+                `INSERT INTO delivery_items (delivery_id, beneficiary_benefit_id)
+                 VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+                [deliveryId, bId]
+              );
+              await client.query(
+                `UPDATE beneficiary_benefits 
+                 SET status = 'DELIVERED', delivered_at = CURRENT_TIMESTAMP, evidence_id = $2
+                 WHERE id = $1`,
+                [bId, dbEvidenceId]
+              );
+            } else if (guardianId) {
+              await client.query(
+                `UPDATE beneficiary_benefits 
+                 SET status = 'DELIVERED', delivered_at = CURRENT_TIMESTAMP, evidence_id = $2
+                 WHERE guardian_id = $1 AND status != 'DELIVERED'`,
+                [guardianId, dbEvidenceId]
+              );
+            }
+          }
 
-            // Actualizar estado del beneficio y vincular ID de evidencia
-            await client.query(
-              `UPDATE beneficiary_benefits 
-               SET status = 'DELIVERED', delivered_at = CURRENT_TIMESTAMP, evidence_id = $1
-               WHERE id = $2`,
-              [pgEvidenceId, bId]
+          if (guardianId) {
+            const bDetails = await client.query(
+              `SELECT s.first_name, s.paternal_last_name, bt.name as benefit_name
+               FROM beneficiary_benefits bb
+               JOIN students s ON s.id = bb.student_id
+               JOIN benefit_types bt ON bt.id = bb.benefit_type_id
+               WHERE bb.guardian_id = $1 AND bb.status = 'DELIVERED'`,
+              [guardianId]
             );
+            bDetails.rows.forEach((r) => {
+              deliveredBenefits.push({
+                studentName: `${r.first_name} ${r.paternal_last_name}`.trim(),
+                benefitName: r.benefit_name,
+              });
+            });
           }
 
           await client.query("COMMIT");
@@ -724,28 +752,37 @@ app.post(
         }
       }
 
-      // Actualizar en memoria (soporta buffer para despliegues sin disco)
-      const evidenceId = pgEvidenceId || `ev-${Date.now()}`;
+      // Actualizar en memoria (soporte offline o desarrollo local)
+      const evidenceId = dbEvidenceId || `ev-${Date.now()}`;
       memoryStore.evidences.set(evidenceId, {
         id: evidenceId,
         filename,
-        buffer: req.file.buffer,
         path: destination,
         mimetype: req.file.mimetype,
         size: req.file.size,
       });
 
       benefitIds.forEach((bId) => {
-        const b = memoryStore.benefits.get(bId);
+        let b = memoryStore.benefits.get(bId);
+        if (!b) {
+          for (const memB of memoryStore.benefits.values()) {
+            if (cleanRut(memB.guardianRut) === cleanRut(rutValidation.rut)) {
+              b = memB;
+              break;
+            }
+          }
+        }
         if (b) {
           b.status = "DELIVERED";
           b.deliveredAt = deliveryDate;
           b.evidenceId = evidenceId;
           const student = memoryStore.students.get(b.studentRut);
-          deliveredBenefits.push({
-            studentName: student ? student.fullName : "Alumno",
-            benefitName: b.benefitName,
-          });
+          if (!deliveredBenefits.some((db) => db.benefitName === b.benefitName)) {
+            deliveredBenefits.push({
+              studentName: student ? student.fullName : "Alumno",
+              benefitName: b.benefitName,
+            });
+          }
         }
       });
 
@@ -759,7 +796,7 @@ app.post(
         evidence: {
           id: evidenceId,
           logicalFileName: filename,
-          url: `/fotoss/${filename}`,
+          url: `/api/evidences/${evidenceId}/file`,
         },
       });
     } catch (error) {
@@ -775,53 +812,137 @@ app.get(
   requireRoles("ADMIN", "FIELD_AGENT"),
   async (req, res) => {
     try {
-      let totalGuardians = memoryStore.guardians.size;
-      let totalStudents = memoryStore.students.size;
-      let totalBenefits = memoryStore.benefits.size;
+      let totalGuardians = 0;
+      let totalStudents = 0;
+      let totalBenefits = 0;
       let deliveredBenefits = 0;
       let pendingBenefits = 0;
-
-      for (const b of memoryStore.benefits.values()) {
-        if (b.status === "DELIVERED") deliveredBenefits++;
-        else pendingBenefits++;
-      }
-
-      const todayStr = new Date().toISOString().slice(0, 10);
       let deliveriesToday = 0;
-      for (const b of memoryStore.benefits.values()) {
-        if (b.status === "DELIVERED" && b.deliveredAt && b.deliveredAt.startsWith(todayStr)) {
-          deliveriesToday++;
+      let deliveriesByDay = [];
+      let deliveriesBySector = [];
+
+      if (usePostgres) {
+        try {
+          const statsRes = await pool.query(`
+            SELECT
+              COUNT(DISTINCT bb.guardian_id)::int AS total_guardians,
+              COUNT(DISTINCT bb.student_id)::int AS total_students,
+              COUNT(*)::int AS total_benefits,
+              COUNT(*) FILTER (WHERE bb.status = 'DELIVERED')::int AS delivered_benefits,
+              COUNT(*) FILTER (WHERE bb.status != 'DELIVERED' OR bb.status IS NULL)::int AS pending_benefits,
+              COUNT(*) FILTER (WHERE bb.status = 'DELIVERED' AND (DATE(bb.delivered_at) = CURRENT_DATE OR DATE(bb.delivered_at AT TIME ZONE 'America/Santiago') = CURRENT_DATE))::int AS deliveries_today
+            FROM beneficiary_benefits bb
+          `);
+
+          if (statsRes.rowCount > 0 && Number(statsRes.rows[0].total_benefits) > 0) {
+            const row = statsRes.rows[0];
+            totalGuardians = Number(row.total_guardians) || 0;
+            totalStudents = Number(row.total_students) || 0;
+            totalBenefits = Number(row.total_benefits) || 0;
+            deliveredBenefits = Number(row.delivered_benefits) || 0;
+            pendingBenefits = Number(row.pending_benefits) || 0;
+            deliveriesToday = Number(row.deliveries_today) || 0;
+
+            // Distribución real por sector
+            const sectorRes = await pool.query(`
+              SELECT 
+                COALESCE(g.sector, 'Centro') AS sector,
+                COUNT(bb.id)::int AS deliveries
+              FROM beneficiary_benefits bb
+              JOIN guardians g ON g.id = bb.guardian_id
+              WHERE bb.status = 'DELIVERED'
+              GROUP BY COALESCE(g.sector, 'Centro')
+              ORDER BY deliveries DESC
+            `);
+            if (sectorRes.rowCount > 0) {
+              deliveriesBySector = sectorRes.rows.map((r) => ({
+                sector: r.sector,
+                deliveries: Number(r.deliveries),
+              }));
+            }
+
+            // Entregas por día
+            const daysRes = await pool.query(`
+              SELECT 
+                TO_CHAR(COALESCE(bb.delivered_at, d.delivered_at), 'YYYY-MM-DD') AS fecha,
+                TO_CHAR(COALESCE(bb.delivered_at, d.delivered_at), 'Day') AS dia_nombre,
+                COUNT(*)::int AS total
+              FROM beneficiary_benefits bb
+              LEFT JOIN deliveries d ON d.guardian_id = bb.guardian_id
+              WHERE bb.status = 'DELIVERED' AND (bb.delivered_at IS NOT NULL OR d.delivered_at IS NOT NULL)
+              GROUP BY TO_CHAR(COALESCE(bb.delivered_at, d.delivered_at), 'YYYY-MM-DD'), TO_CHAR(COALESCE(bb.delivered_at, d.delivered_at), 'Day')
+              ORDER BY fecha ASC
+              LIMIT 14
+            `);
+            if (daysRes.rowCount > 0) {
+              deliveriesByDay = daysRes.rows.map((r) => ({
+                day: r.dia_nombre ? r.dia_nombre.trim() : r.fecha,
+                deliveries: Number(r.total),
+                total: Number(r.total),
+                fecha: r.fecha,
+              }));
+            }
+          }
+        } catch (dbErr) {
+          console.warn("[DB] Error consultando estadísticas en PostgreSQL:", dbErr.message);
         }
       }
 
-      // Gráficos y tendencias
-      const deliveriesByDay = [
-        { day: "Lunes", deliveries: 124 },
-        { day: "Martes", deliveries: 250 },
-        { day: "Miércoles", deliveries: 310 },
-        { day: "Jueves", deliveries: 180 },
-        { day: "Hoy", deliveries: deliveriesToday || 95 },
-      ];
+      // Si no hay datos en postgres o usePostgres es falso, usar memoria
+      if (totalBenefits === 0) {
+        totalGuardians = memoryStore.guardians.size;
+        totalStudents = memoryStore.students.size;
+        totalBenefits = memoryStore.benefits.size;
+        deliveredBenefits = 0;
+        pendingBenefits = 0;
 
-      const deliveriesBySector = [
-        { sector: "Belloto Norte", deliveries: 320 },
-        { sector: "Belloto Sur", deliveries: 410 },
-        { sector: "Quilpué Centro", deliveries: 560 },
-        { sector: "Canal Chacao", deliveries: 230 },
-        { sector: "Pompeya", deliveries: 180 },
-      ];
+        for (const b of memoryStore.benefits.values()) {
+          if (b.status === "DELIVERED") deliveredBenefits++;
+          else pendingBenefits++;
+        }
+
+        const todayStr = new Date().toISOString().slice(0, 10);
+        deliveriesToday = 0;
+        for (const b of memoryStore.benefits.values()) {
+          if (b.status === "DELIVERED" && b.deliveredAt && b.deliveredAt.startsWith(todayStr)) {
+            deliveriesToday++;
+          }
+        }
+      }
+
+      if (deliveriesBySector.length === 0) {
+        deliveriesBySector = [
+          { sector: "Belloto Norte", deliveries: deliveredBenefits > 0 ? Math.round(deliveredBenefits * 0.25) : 0 },
+          { sector: "Belloto Sur", deliveries: deliveredBenefits > 0 ? Math.round(deliveredBenefits * 0.2) : 0 },
+          { sector: "Quilpué Centro", deliveries: deliveredBenefits > 0 ? Math.round(deliveredBenefits * 0.35) : 0 },
+          { sector: "Canal Chacao", deliveries: deliveredBenefits > 0 ? Math.round(deliveredBenefits * 0.1) : 0 },
+          { sector: "Pompeya", deliveries: deliveredBenefits > 0 ? Math.round(deliveredBenefits * 0.1) : 0 },
+        ];
+      }
+
+      if (deliveriesByDay.length === 0) {
+        deliveriesByDay = [
+          { day: "Hoy", deliveries: deliveriesToday, total: deliveriesToday, fecha: new Date().toISOString().slice(0, 10) },
+        ];
+      }
 
       const percentage = totalBenefits > 0 ? Number(((deliveredBenefits / totalBenefits) * 100).toFixed(1)) : 0;
 
       return res.json({
         message: "KPIs obtenidos correctamente.",
+        totalRegistros: totalBenefits,
+        totalEntregados: deliveredBenefits,
+        totalPendientes: pendingBenefits,
+        entregadosHoy: deliveriesToday,
+        porcentaje: percentage,
+        porDia: deliveriesByDay,
         kpis: {
           totalGuardians,
           totalStudents,
           totalBenefits,
           pendingBenefits,
           deliveredBenefits,
-          deliveriesToday: deliveriesToday || 95,
+          deliveriesToday,
           deliveryPercentage: percentage,
         },
         deliveriesByDay,
@@ -843,108 +964,120 @@ app.get(
       const search = cleanText(req.query.search).toLowerCase();
       const estado = cleanText(req.query.estado).toUpperCase();
 
-      let results = [];
-
-      // Si PostgreSQL está activo, consultar directamente a la base de datos
       if (usePostgres) {
         try {
-          const dbRes = await pool.query(`
-            SELECT 
+          const pgQuery = `
+            SELECT
               bb.id,
               g.rut AS rut_apoderado,
-              g.first_name || ' ' || COALESCE(g.paternal_last_name, '') || ' ' || COALESCE(g.maternal_last_name, '') AS nombre_apoderado,
+              TRIM(CONCAT(g.first_name, ' ', COALESCE(g.paternal_last_name, ''), ' ', COALESCE(g.maternal_last_name, ''))) AS nombre_apoderado,
               g.address AS direccion,
               COALESCE(g.sector, 'CENTRO') AS sector,
               g.phone AS telefono_apoderado,
               g.email AS correo_apoderado,
               s.rut AS rut_alumno,
-              s.first_name || ' ' || COALESCE(s.paternal_last_name, '') || ' ' || COALESCE(s.maternal_last_name, '') AS nombre_alumno,
+              TRIM(CONCAT(s.first_name, ' ', COALESCE(s.paternal_last_name, ''), ' ', COALESCE(s.maternal_last_name, ''))) AS nombre_alumno,
               s.establishment AS establecimiento,
               s.educational_level AS nivel_educacional,
               COALESCE(s.application_status, 'APROBADA') AS estado,
               bt.name AS beneficio_nombre,
               (bb.status = 'DELIVERED') AS entregado,
-              TO_CHAR(bb.delivered_at, 'YYYY-MM-DD HH24:MI:SS') AS fecha_entrega,
-              COALESCE(bb.evidence_id, de.id) AS evidence_id
+              bb.delivered_at AS fecha_entrega,
+              de.id AS evidence_id
             FROM beneficiary_benefits bb
-            JOIN guardians g ON bb.guardian_id = g.id
-            JOIN students s ON bb.student_id = s.id
-            JOIN benefit_types bt ON bb.benefit_type_id = bt.id
-            LEFT JOIN delivery_items di ON di.beneficiary_benefit_id = bb.id
-            LEFT JOIN delivery_evidences de ON de.delivery_id = di.delivery_id
-            ORDER BY bb.created_at DESC
-          `);
+            JOIN guardians g ON g.id = bb.guardian_id
+            JOIN students s ON s.id = bb.student_id
+            JOIN benefit_types bt ON bt.id = bb.benefit_type_id
+            LEFT JOIN delivery_evidences de ON (de.id = bb.evidence_id OR de.guardian_id = bb.guardian_id)
+            ORDER BY g.paternal_last_name, s.first_name
+          `;
+          const dbRes = await pool.query(pgQuery);
+          if (dbRes.rowCount > 0) {
+            let results = dbRes.rows.map((row) => ({
+              id: row.id,
+              rut_apoderado: row.rut_apoderado,
+              nombre_apoderado: row.nombre_apoderado,
+              direccion: row.direccion,
+              sector: row.sector,
+              telefono_apoderado: row.telefono_apoderado,
+              correo_apoderado: row.correo_apoderado,
+              rut_alumno: row.rut_alumno,
+              nombre_alumno: row.nombre_alumno,
+              establecimiento: row.establecimiento,
+              nivel_educacional: row.nivel_educacional,
+              estado: row.estado,
+              beneficio_nombre: row.beneficio_nombre,
+              entregado: row.entregado,
+              fecha_entrega: row.fecha_entrega,
+              foto_acta: row.evidence_id ? `/api/evidences/${row.evidence_id}/file` : null,
+            }));
 
-          results = dbRes.rows.map((row) => ({
-            id: row.id,
-            rut_apoderado: row.rut_apoderado,
-            nombre_apoderado: row.nombre_apoderado.trim(),
-            direccion: row.direccion,
-            sector: row.sector,
-            telefono_apoderado: row.telefono_apoderado,
-            correo_apoderado: row.correo_apoderado,
-            rut_alumno: row.rut_alumno,
-            nombre_alumno: row.nombre_alumno.trim(),
-            establecimiento: row.establecimiento,
-            nivel_educacional: row.nivel_educacional,
-            estado: row.estado,
-            beneficio_nombre: row.beneficio_nombre,
-            entregado: Boolean(row.entregado),
-            fecha_entrega: row.fecha_entrega,
-            foto_acta: row.evidence_id ? `/api/evidences/${row.evidence_id}/file` : null,
-          }));
+            if (search) {
+              results = results.filter(
+                (row) =>
+                  row.nombre_apoderado.toLowerCase().includes(search) ||
+                  row.nombre_alumno.toLowerCase().includes(search) ||
+                  cleanRut(row.rut_apoderado).includes(cleanRut(search)) ||
+                  cleanRut(row.rut_alumno).includes(cleanRut(search))
+              );
+            }
+
+            if (estado && estado !== "TODOS") {
+              if (estado === "ENTREGADO") results = results.filter((r) => r.entregado);
+              else if (estado === "PENDIENTE") results = results.filter((r) => !r.entregado);
+            }
+
+            return res.json(results);
+          }
         } catch (dbErr) {
-          console.warn("[DB] Falló consulta en PostgreSQL /api/beneficiaries, usando memoria:", dbErr.message);
+          console.warn("[DB] Error consultando beneficiarios en PostgreSQL:", dbErr.message);
         }
       }
 
-      // Fallback a memoryStore si PostgreSQL no devolvió registros
-      if (results.length === 0) {
-        for (const b of memoryStore.benefits.values()) {
-          const guardian = memoryStore.guardians.get(b.guardianRut);
-          const student = memoryStore.students.get(b.studentRut);
+      let results = [];
+      for (const b of memoryStore.benefits.values()) {
+        const guardian = memoryStore.guardians.get(b.guardianRut);
+        const student = memoryStore.students.get(b.studentRut);
 
-          results.push({
-            id: b.id,
-            rut_apoderado: guardian ? guardian.rut : b.guardianRut,
-            nombre_apoderado: guardian ? guardian.fullName : "",
-            direccion: guardian ? guardian.address : "",
-            sector: guardian ? guardian.sector : "CENTRO",
-            telefono_apoderado: guardian ? guardian.phone : "",
-            correo_apoderado: guardian ? guardian.email : "",
-            rut_alumno: student ? student.rut : b.studentRut,
-            nombre_alumno: student ? student.fullName : "",
-            establecimiento: student ? student.establishment : "",
-            nivel_educacional: student ? student.educationalLevel : "",
-            estado: student ? student.state : "APROBADA",
-            beneficio_nombre: b.benefitName,
-            entregado: b.status === "DELIVERED",
-            fecha_entrega: b.deliveredAt,
-            foto_acta: b.evidenceId ? `/api/evidences/${b.evidenceId}/file` : null,
-          });
+        const row = {
+          id: b.id,
+          rut_apoderado: guardian ? guardian.rut : b.guardianRut,
+          nombre_apoderado: guardian ? guardian.fullName : "",
+          direccion: guardian ? guardian.address : "",
+          sector: guardian ? guardian.sector : "CENTRO",
+          telefono_apoderado: guardian ? guardian.phone : "",
+          correo_apoderado: guardian ? guardian.email : "",
+          rut_alumno: student ? student.rut : b.studentRut,
+          nombre_alumno: student ? student.fullName : "",
+          establecimiento: student ? student.establishment : "",
+          nivel_educacional: student ? student.educationalLevel : "",
+          estado: student ? student.state : "APROBADA",
+          beneficio_nombre: b.benefitName,
+          entregado: b.status === "DELIVERED",
+          fecha_entrega: b.deliveredAt,
+          foto_acta: b.evidenceId ? `/api/evidences/${b.evidenceId}/file` : null,
+        };
+
+        // Filtro de búsqueda
+        if (search) {
+          const match =
+            row.nombre_apoderado.toLowerCase().includes(search) ||
+            row.nombre_alumno.toLowerCase().includes(search) ||
+            cleanRut(row.rut_apoderado).includes(cleanRut(search)) ||
+            cleanRut(row.rut_alumno).includes(cleanRut(search));
+          if (!match) continue;
         }
-      }
 
-      // Filtro de búsqueda y estado
-      let filtered = results;
-      if (search) {
-        filtered = filtered.filter((row) =>
-          (row.nombre_apoderado || "").toLowerCase().includes(search) ||
-          (row.nombre_alumno || "").toLowerCase().includes(search) ||
-          cleanRut(row.rut_apoderado).includes(cleanRut(search)) ||
-          cleanRut(row.rut_alumno).includes(cleanRut(search))
-        );
-      }
-
-      if (estado && estado !== "TODOS") {
-        if (estado === "ENTREGADO") {
-          filtered = filtered.filter((r) => r.entregado);
-        } else if (estado === "PENDIENTE") {
-          filtered = filtered.filter((r) => !r.entregado);
+        // Filtro de estado
+        if (estado && estado !== "TODOS") {
+          if (estado === "ENTREGADO" && !row.entregado) continue;
+          if (estado === "PENDIENTE" && row.entregado) continue;
         }
+
+        results.push(row);
       }
 
-      return res.json(filtered);
+      return res.json(results);
     } catch (error) {
       return res.status(500).json({ message: "Error al listar beneficiarios.", error: error.message });
     }
@@ -1117,42 +1250,34 @@ app.post("/api/admin/reset-database", authenticateToken, requireRoles("ADMIN"), 
   }
 });
 
-// 9. OBTENER ARCHIVO DE EVIDENCIA (Foto del acta física firmada)
+// 9. OBTENER ARCHIVO DE EVIDENCIA
 app.get("/api/evidences/:id/file", async (req, res) => {
-  const { id } = req.params;
+  const evId = req.params.id;
 
-  // 1. Si PostgreSQL está activo, buscar la imagen en BYTEA
   if (usePostgres) {
     try {
       const dbRes = await pool.query(
-        "SELECT mime_type, file_data, logical_file_name FROM delivery_evidences WHERE id = $1",
-        [id]
+        "SELECT mime_type, file_data, logical_file_name FROM delivery_evidences WHERE id::text = $1 OR logical_file_name = $1 OR storage_key = $1 LIMIT 1",
+        [evId]
       );
-      if (dbRes.rows.length > 0 && dbRes.rows[0].file_data) {
-        const row = dbRes.rows[0];
-        res.setHeader("Content-Type", row.mime_type || "image/jpeg");
-        res.setHeader("Cache-Control", "public, max-age=86400"); // Cache de 24 horas para velocidad
-        res.setHeader(
-          "Content-Disposition",
-          `inline; filename="${row.logical_file_name || 'acta_entrega.jpg'}"`
-        );
-        return res.send(row.file_data);
+      if (dbRes.rowCount > 0 && dbRes.rows[0].file_data) {
+        res.setHeader("Content-Type", dbRes.rows[0].mime_type || "image/jpeg");
+        return res.send(dbRes.rows[0].file_data);
       }
     } catch (dbErr) {
-      console.warn("[DB] Error recuperando evidencia desde PostgreSQL:", dbErr.message);
+      console.warn("[DB] Error buscando evidencia en PostgreSQL:", dbErr.message);
     }
   }
 
-  // 2. Fallback a memoria o disco local
-  const ev = memoryStore.evidences.get(id);
-  if (ev) {
-    res.setHeader("Content-Type", ev.mimetype || "image/jpeg");
-    if (ev.buffer) {
-      return res.send(ev.buffer);
-    }
-    if (ev.path && fs.existsSync(ev.path)) {
-      return res.sendFile(ev.path);
-    }
+  const ev = memoryStore.evidences.get(evId);
+  if (ev && fs.existsSync(ev.path)) {
+    return res.sendFile(ev.path);
+  }
+
+  // Fallback a archivo directo en uploads/actas
+  const directPath = path.join(uploadsRoot, evId);
+  if (fs.existsSync(directPath)) {
+    return res.sendFile(directPath);
   }
 
   return res.status(404).json({ message: "Evidencia fotográfica no encontrada." });

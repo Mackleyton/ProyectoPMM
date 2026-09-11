@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { apiService, API_BASE } from '../services/apiService';
+import { apiService } from '../services/apiService';
 import { formatRut, cleanRut } from '../utils/rutUtils';
 
 export default function AdminBeneficiariosPage({ onOpenImportModal }) {
@@ -10,8 +10,6 @@ export default function AdminBeneficiariosPage({ onOpenImportModal }) {
 
   // Beneficiario seleccionado para ver el detalle (preliminar2.png pantallas 3 y 4)
   const [selectedItem, setSelectedItem] = useState(null);
-  // Modal de zoom para inspección visual del acta en alta resolución
-  const [zoomActaUrl, setZoomActaUrl] = useState(null);
 
   async function cargar() {
     setLoading(true);
@@ -248,44 +246,26 @@ export default function AdminBeneficiariosPage({ onOpenImportModal }) {
               <div className="detail-status-column">
                 {selectedItem.entregado ? (
                   <div className="acta-delivered-box">
-                    {(() => {
-                      const rawPhoto = selectedItem.foto_acta || selectedItem.foto_entrega;
-                      const fotoUrl = rawPhoto
-                        ? (rawPhoto.startsWith('http') || rawPhoto.startsWith('data:') ? rawPhoto : `${API_BASE}${rawPhoto}`)
-                        : null;
-
-                      return (
-                        <div className="acta-document-preview">
-                          {fotoUrl ? (
-                            <div
-                              className="acta-photo-interactive-container"
-                              onClick={() => setZoomActaUrl(fotoUrl)}
-                              title="Haz clic para ver el acta en alta resolución"
-                            >
-                              <img
-                                src={fotoUrl}
-                                alt="Acta firmada"
-                                className="acta-real-photo"
-                              />
-                              <div className="acta-photo-overlay-tag">
-                                🔍 Clic para ampliar acta
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="acta-paper-mockup">
-                              <div className="paper-seal">🏛️</div>
-                              <div className="paper-header-line" />
-                              <div className="paper-text-line" />
-                              <div className="paper-text-line short" />
-                              <div className="paper-signature">
-                                <span className="signature-mark">✍️ Firmado</span>
-                                <small>Acta de Entrega Digitalizada</small>
-                              </div>
-                            </div>
-                          )}
+                    <div className="acta-document-preview">
+                      {selectedItem.foto_acta || selectedItem.foto_entrega ? (
+                        <img
+                          src={selectedItem.foto_acta || selectedItem.foto_entrega}
+                          alt="Acta firmada"
+                          className="acta-real-photo"
+                        />
+                      ) : (
+                        <div className="acta-paper-mockup">
+                          <div className="paper-seal">🏛️</div>
+                          <div className="paper-header-line" />
+                          <div className="paper-text-line" />
+                          <div className="paper-text-line short" />
+                          <div className="paper-signature">
+                            <span className="signature-mark">✍️ Firmado</span>
+                            <small>Acta de Entrega Digitalizada</small>
+                          </div>
                         </div>
-                      );
-                    })()}
+                      )}
+                    </div>
 
                     <div className="status-badge-delivered-wrap">
                       <div className="delivered-circle-icon">✓</div>
@@ -307,47 +287,6 @@ export default function AdminBeneficiariosPage({ onOpenImportModal }) {
                   </div>
                 )}
               </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Lightbox de inspección del Acta Física en Alta Resolución */}
-      {zoomActaUrl && selectedItem && (
-        <div className="modal-backdrop" onClick={() => setZoomActaUrl(null)}>
-          <div className="acta-lightbox-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="acta-lightbox-header">
-              <div className="acta-lightbox-titles">
-                <h3>Acta de Entrega Digitalizada</h3>
-                <p>
-                  Beneficiario: <strong>{selectedItem.nombre_alumno || selectedItem.nombre_apoderado}</strong> | RUT: <strong>{selectedItem.rut_apoderado}</strong>
-                </p>
-              </div>
-              <div className="acta-lightbox-actions">
-                <a
-                  href={zoomActaUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="btn btn-secondary btn-sm"
-                  download={`Acta_${cleanRut(selectedItem.rut_apoderado || 'entrega')}.jpg`}
-                >
-                  ⬇ Descargar Original
-                </a>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => setZoomActaUrl(null)}
-                >
-                  ✕ Cerrar
-                </button>
-              </div>
-            </div>
-            <div className="acta-lightbox-body">
-              <img
-                src={zoomActaUrl}
-                alt="Acta de entrega firmada"
-                className="acta-lightbox-img"
-              />
             </div>
           </div>
         </div>

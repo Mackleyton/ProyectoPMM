@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { apiService } from '../services/apiService';
 
 function formatFecha(iso) {
   if (!iso) return iso;
@@ -15,9 +16,8 @@ export default function KPIsPage() {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/apis/kpis');
-      if (!res.ok) throw new Error('Error al cargar KPIs');
-      setKpis(await res.json());
+      const data = await apiService.obtenerKpis();
+      setKpis(data);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -31,10 +31,12 @@ export default function KPIsPage() {
   if (error)   return <div className="msg-error">⚠️ {error}</div>;
   if (!kpis)   return null;
 
-  const { totalRegistros, totalEntregados, porDia } = kpis;
-  const pendientes = totalRegistros - totalEntregados;
+  const totalRegistros = kpis.totalRegistros ?? kpis.kpis?.totalBenefits ?? 0;
+  const totalEntregados = kpis.totalEntregados ?? kpis.kpis?.deliveredBenefits ?? 0;
+  const porDia = kpis.porDia || kpis.deliveriesByDay || [];
+  const pendientes = kpis.totalPendientes ?? Math.max(0, totalRegistros - totalEntregados);
   const pct = totalRegistros > 0 ? Math.round((totalEntregados / totalRegistros) * 100) : 0;
-  const maxDia = Math.max(...(porDia.map(d => d.total)), 1);
+  const maxDia = porDia.length > 0 ? Math.max(...porDia.map((d) => d.total || d.deliveries || 1), 1) : 1;
 
   // Show last 14 days in order (oldest → newest)
   const diasOrdenados = [...porDia].reverse().slice(-14);
@@ -74,18 +76,22 @@ export default function KPIsPage() {
           <p style={{ fontSize: '0.88rem', color: '#9ca3af' }}>Aún no hay entregas registradas.</p>
         ) : (
           <div className="bar-chart">
-            {diasOrdenados.map((d) => (
-              <div key={d.fecha} className="bar-row">
-                <span className="bar-label">{formatFecha(d.fecha)}</span>
-                <div className="bar-track">
-                  <div
-                    className="bar-fill"
-                    style={{ width: `${(d.total / maxDia) * 100}%` }}
-                  />
+            {diasOrdenados.map((d, idx) => {
+              const val = d.total ?? d.deliveries ?? 0;
+              const label = d.fecha ? formatFecha(d.fecha) : (d.day || `Día ${idx + 1}`);
+              return (
+                <div key={d.fecha || d.day || idx} className="bar-row">
+                  <span className="bar-label">{label}</span>
+                  <div className="bar-track">
+                    <div
+                      className="bar-fill"
+                      style={{ width: `${(val / maxDia) * 100}%` }}
+                    />
+                  </div>
+                  <span className="bar-count">{val}</span>
                 </div>
-                <span className="bar-count">{d.total}</span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

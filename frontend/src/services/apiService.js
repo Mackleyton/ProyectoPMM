@@ -188,16 +188,23 @@ export const apiService = {
       throw new Error(data.message || 'Error al obtener indicadores');
     }
 
+    const kpisObj = data.kpis || {};
+    const totalRegistros = data.totalRegistros ?? kpisObj.totalBenefits ?? 0;
+    const totalEntregados = data.totalEntregados ?? kpisObj.deliveredBenefits ?? 0;
+    const totalPendientes = data.totalPendientes ?? kpisObj.pendingBenefits ?? Math.max(0, totalRegistros - totalEntregados);
+    const entregadosHoy = data.entregadosHoy ?? kpisObj.deliveriesToday ?? 0;
+    const porcentaje = data.porcentaje ?? kpisObj.deliveryPercentage ?? (totalRegistros > 0 ? Number(((totalEntregados / totalRegistros) * 100).toFixed(1)) : 0);
+
     return {
-      kpis: data.kpis || {},
-      deliveriesByDay: data.deliveriesByDay || [],
+      kpis: kpisObj,
+      deliveriesByDay: data.deliveriesByDay || data.porDia || [],
       deliveriesBySector: data.deliveriesBySector || [],
-      // Mapeo retrocompatible para componentes existentes
-      totalRegistros: data.kpis?.totalBenefits || 0,
-      totalEntregados: data.kpis?.deliveredBenefits || 0,
-      totalPendientes: data.kpis?.pendingBenefits || 0,
-      entregadosHoy: data.kpis?.deliveriesToday || 0,
-      porcentaje: data.kpis?.deliveryPercentage || 0,
+      totalRegistros,
+      totalEntregados,
+      totalPendientes,
+      entregadosHoy,
+      porcentaje,
+      porDia: data.porDia || data.deliveriesByDay || [],
     };
   },
 
