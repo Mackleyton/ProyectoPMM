@@ -1,14 +1,8 @@
 import { useState, useRef } from 'react';
 import { formatRut, validateRut, cleanRut } from '../utils/rutUtils';
-import { compressImage } from '../utils/imageUtils';
 import { apiService } from '../services/apiService';
 import CameraModal from '../components/CameraModal';
 import SuccessModal from '../components/SuccessModal';
-
-function isBenefitDelivered(status) {
-  const s = String(status || '').trim().toUpperCase();
-  return s === 'DELIVERED' || s === 'ENTREGADO';
-}
 
 export default function TerrenoView() {
   const [rutInput, setRutInput] = useState('');
@@ -31,7 +25,6 @@ export default function TerrenoView() {
   const [entregaExitosaData, setEntregaExitosaData] = useState(null);
 
   const inputRef = useRef(null);
-  const fileDirectInputRef = useRef(null);
 
   // Manejar escritura de RUT con formateo dinámico
   function handleRutChange(e) {
@@ -72,10 +65,10 @@ export default function TerrenoView() {
         setGuardian(data.guardian);
         setBenefits(data.benefits || []);
 
-        // Preseleccionar beneficios que estén pendientes
+        // Preseleccionar beneficios que estén en estado PENDING
         const initialSelected = new Set();
         (data.benefits || []).forEach((b) => {
-          if (!isBenefitDelivered(b.status)) {
+          if (b.status === 'PENDING') {
             initialSelected.add(b.benefitId);
           }
         });
@@ -99,7 +92,7 @@ export default function TerrenoView() {
   }
 
   function toggleTodos() {
-    const pendingList = benefits.filter((b) => !isBenefitDelivered(b.status));
+    const pendingList = benefits.filter((b) => b.status === 'PENDING');
     if (checkedBenefitIds.size === pendingList.length) {
       setCheckedBenefitIds(new Set());
     } else {
@@ -113,36 +106,13 @@ export default function TerrenoView() {
     setFotoDataUrl(dataUrl);
   }
 
-  async function handleDirectFileUpload(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    try {
-      setLoading(true);
-      const compressed = await compressImage(file, 1600, 0.85);
-      setFotoFile(compressed.file);
-      setFotoDataUrl(compressed.dataUrl);
-    } catch (err) {
-      console.warn('Error comprimiendo foto directa:', err);
-      setFotoFile(file);
-      setFotoDataUrl(URL.createObjectURL(file));
-    } finally {
-      setLoading(false);
-      if (e.target) e.target.value = '';
-    }
-  }
-
   async function handleRegistrarEntrega() {
-    if (pendingBenefits.length === 0) {
-      alert('Todos los beneficios asociados a este apoderado ya fueron entregados previamente.');
-      return;
-    }
     if (checkedBenefitIds.size === 0) {
-      alert('Debes marcar al menos una casilla de estudiante/beneficio para registrar su entrega.');
+      alert('Debe marcar al menos un beneficio con el checkbox para realizar la entrega.');
       return;
     }
     if (!fotoFile && !fotoDataUrl) {
-      alert('Es obligatorio capturar o subir la fotografía del acta física firmada.');
+      alert('Es obligatorio capturar la fotografía del acta física firmada.');
       setIsCameraOpen(true);
       return;
     }
@@ -217,7 +187,7 @@ export default function TerrenoView() {
     inputRef.current?.focus();
   }
 
-  const pendingBenefits = benefits.filter((b) => !isBenefitDelivered(b.status));
+  const pendingBenefits = benefits.filter((b) => b.status === 'PENDING');
 
   return (
     <div className="terreno-view-container">
@@ -346,7 +316,7 @@ export default function TerrenoView() {
               <div className="alumnos-list">
                 {benefits.map((b) => {
                   const isChecked = checkedBenefitIds.has(b.benefitId);
-                  const isDelivered = isBenefitDelivered(b.status);
+                  const isDelivered = b.status === 'DELIVERED';
 
                   return (
                     <div
@@ -417,102 +387,47 @@ export default function TerrenoView() {
                   <img src={fotoDataUrl} alt="Acta firmada" className="attached-img" />
                   <div className="attached-info">
                     <span className="attached-success-text">✓ Fotografía del acta adjunta</span>
-                    <div className="attached-actions-row">
-                      <button
-                        type="button"
-                        className="btn btn-outline btn-sm"
-                        onClick={() => setIsCameraOpen(true)}
-                      >
-                        📷 Repetir con Cámara
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-outline btn-sm"
-                        onClick={() => fileDirectInputRef.current?.click()}
-                      >
-                        📁 Cambiar Archivo
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-sm"
+                      onClick={() => setIsCameraOpen(true)}
+                    >
+                      📷 Repetir Fotografía
+                    </button>
                   </div>
                 </div>
               ) : (
-                <div className="camera-choice-grid">
-                  <div
-                    className="camera-dropzone"
-                    onClick={() => setIsCameraOpen(true)}
-                    role="button"
-                    tabIndex={0}
-                  >
-                    <div className="camera-icon-circle">
-                      <svg viewBox="0 0 24 24" className="camera-svg-icon" fill="none" stroke="currentColor">
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth="1.8"
-                          d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"
-                        />
-                        <circle cx="12" cy="13" r="4" strokeWidth="1.8" />
-                      </svg>
-                    </div>
-                    <span className="camera-dropzone-text">Capturar con Cámara</span>
-                    <small className="camera-dropzone-sub">
-                      Abrir visor en vivo para móvil, tablet o PC
-                    </small>
+                <div
+                  className="camera-dropzone"
+                  onClick={() => setIsCameraOpen(true)}
+                  role="button"
+                  tabIndex={0}
+                >
+                  <div className="camera-icon-circle">
+                    <svg viewBox="0 0 24 24" className="camera-svg-icon" fill="none" stroke="currentColor">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="1.8"
+                        d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"
+                      />
+                      <circle cx="12" cy="13" r="4" strokeWidth="1.8" />
+                    </svg>
                   </div>
-
-                  <div
-                    className="camera-dropzone camera-dropzone-file"
-                    onClick={() => fileDirectInputRef.current?.click()}
-                    role="button"
-                    tabIndex={0}
-                  >
-                    <div className="camera-icon-circle file-icon">
-                      📁
-                    </div>
-                    <span className="camera-dropzone-text">Subir Archivo / Galería</span>
-                    <small className="camera-dropzone-sub">
-                      Seleccionar imagen o foto guardada
-                    </small>
-                  </div>
+                  <span className="camera-dropzone-text">Capturar Fotografía Del Acta</span>
+                  <small className="camera-dropzone-sub">
+                    Fotografíe la firma en el acta física para respaldo y trazabilidad
+                  </small>
                 </div>
               )}
-
-              {/* Input oculto para subida directa de archivo */}
-              <input
-                ref={fileDirectInputRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                style={{ display: 'none' }}
-                onChange={handleDirectFileUpload}
-              />
             </div>
-
-            {/* BANNER DE ESTADO ANTES DEL BOTÓN */}
-            {pendingBenefits.length === 0 ? (
-              <div className="status-hint-badge status-hint-success">
-                ✅ Todos los beneficios de este apoderado ya fueron entregados previamente.
-              </div>
-            ) : checkedBenefitIds.size === 0 ? (
-              <div className="status-hint-badge status-hint-warning">
-                ⚠️ Selecciona al menos un estudiante con la casilla arriba para registrar entrega.
-              </div>
-            ) : !fotoDataUrl ? (
-              <div className="status-hint-badge status-hint-info">
-                📷 Adjunta la fotografía del acta firmada para habilitar el registro.
-              </div>
-            ) : (
-              <div className="status-hint-badge status-hint-ready">
-                ✓ Todo listo: {checkedBenefitIds.size} entrega(s) con fotografía de respaldo lista.
-              </div>
-            )}
 
             {/* BOTÓN REGISTRAR ENTREGA */}
             <button
               type="button"
               className="btn btn-yellow btn-lg full-width"
               onClick={handleRegistrarEntrega}
-              disabled={loading || pendingBenefits.length === 0}
+              disabled={loading || checkedBenefitIds.size === 0}
             >
               {loading ? 'Registrando Entrega en Servidor…' : 'Registrar Entrega'}
             </button>
