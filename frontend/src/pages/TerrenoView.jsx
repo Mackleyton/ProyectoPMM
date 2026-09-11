@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { formatRut, validateRut, cleanRut } from '../utils/rutUtils';
-import { apiService } from '../services/apiService';
+import { apiService, API_BASE } from '../services/apiService';
 import CameraModal from '../components/CameraModal';
 import SuccessModal from '../components/SuccessModal';
 
@@ -19,6 +19,7 @@ export default function TerrenoView() {
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [fotoFile, setFotoFile] = useState(null);
   const [fotoDataUrl, setFotoDataUrl] = useState(null);
+  const [actaPreviewUrl, setActaPreviewUrl] = useState(null);
 
   // Modal de éxito
   const [showSuccess, setShowSuccess] = useState(false);
@@ -363,6 +364,18 @@ export default function TerrenoView() {
                             {b.deliveredAt && (
                               <small>Fecha: {b.deliveredAt}</small>
                             )}
+                            {(b.fotoActa || b.evidenceId) && (
+                              <button
+                                type="button"
+                                className="btn-ver-acta-pill"
+                                onClick={() => {
+                                  const raw = b.fotoActa || `/api/evidences/${b.evidenceId}/file`;
+                                  setActaPreviewUrl(raw.startsWith('http') ? raw : `${API_BASE}${raw}`);
+                                }}
+                              >
+                                📄 Ver Acta Digitalizada
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
@@ -450,6 +463,34 @@ export default function TerrenoView() {
         beneficiariosEntregados={entregaExitosaData?.beneficiarios}
         fecha={entregaExitosaData?.fecha}
       />
+
+      {/* MODAL DE VISUALIZACIÓN DE ACTA DIGITALIZADA */}
+      {actaPreviewUrl && (
+        <div className="modal-backdrop" onClick={() => setActaPreviewUrl(null)}>
+          <div className="acta-lightbox-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="acta-lightbox-header">
+              <div className="acta-lightbox-titles">
+                <h3>Acta de Entrega Registrada</h3>
+                <p>Apoderado: <strong>{guardian?.fullName}</strong> ({guardian?.rut})</p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setActaPreviewUrl(null)}
+              >
+                ✕ Cerrar
+              </button>
+            </div>
+            <div className="acta-lightbox-body">
+              <img
+                src={actaPreviewUrl}
+                alt="Acta digitalizada de entrega"
+                className="acta-lightbox-img"
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

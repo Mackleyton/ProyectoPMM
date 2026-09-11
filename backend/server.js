@@ -142,14 +142,26 @@ function createToken(user) {
 // =========================================================
 
 let usePostgres = false;
-const pool = new Pool({
-  host: process.env.DB_HOST || "localhost",
-  port: Number(process.env.DB_PORT || 5432),
-  database: process.env.DB_NAME || "beneficios_db",
-  user: process.env.DB_USER || "postgres",
-  password: process.env.DB_PASSWORD || "postgres",
-  connectionTimeoutMillis: 2000,
-});
+
+// Configuración de conexión compatible con Render PostgreSQL (DATABASE_URL con SSL) o Local
+const connectionString = process.env.DATABASE_URL;
+const pool = new Pool(
+  connectionString
+    ? {
+        connectionString,
+        ssl: { rejectUnauthorized: false },
+        connectionTimeoutMillis: 10000,
+      }
+    : {
+        host: process.env.DB_HOST || "localhost",
+        port: Number(process.env.DB_PORT || 5432),
+        database: process.env.DB_NAME || "beneficios_db",
+        user: process.env.DB_USER || "postgres",
+        password: process.env.DB_PASSWORD || "postgres",
+        ssl: process.env.DB_SSL === "true" ? { rejectUnauthorized: false } : false,
+        connectionTimeoutMillis: 3000,
+      }
+);
 
 // Almacén en memoria para cuando PostgreSQL no esté en ejecución
 const memoryStore = {
@@ -246,7 +258,7 @@ loadSeedDataToMemory();
 async function initDatabase() {
   try {
     const client = await pool.connect();
-    console.log("[DB] ¡Conectado exitosamente a PostgreSQL local (5432)!");
+    console.log("[DB] ¡Conectado exitosamente a PostgreSQL (Render/Local)!");
     usePostgres = true;
 
     // Ejecutar init.sql para crear tablas si no existen
@@ -256,6 +268,12 @@ async function initDatabase() {
       await client.query(sql);
       console.log("[DB] Esquema DDL verificado/creado en PostgreSQL.");
     }
+
+    // Migraciones automáticas seguras para soporte de fotos de actas (BYTEA)
+    await client.query(`
+      ALTER TABLE delivery_evidences ADD COLUMN IF NOT EXISTS file_data BYTEA;
+      ALTER TABLE beneficiary_benefits ADD COLUMN IF NOT EXISTS evidence_id UUID REFERENCES delivery_evidences(id) ON DELETE SET NULL;
+    `);
 
     // Asegurar usuarios iniciales en PostgreSQL
     const adminHash = await bcrypt.hash("Admin123!", 10);
@@ -480,12 +498,15 @@ app.get(
           if (guardian) {
             const bRes = await pool.query(
               `SELECT bb.id AS benefit_id, bb.status, bb.delivered_at,
+                      COALESCE(bb.evidence_id, de.id) AS evidence_id,
                       bt.name AS benefit_name,
                       s.rut AS student_rut, s.first_name, s.paternal_last_name, s.maternal_last_name,
                       s.establishment, s.educational_level
                FROM beneficiary_benefits bb
                JOIN benefit_types bt ON bt.id = bb.benefit_type_id
                JOIN students s ON s.id = bb.student_id
+               LEFT JOIN delivery_items di ON di.beneficiary_benefit_id = bb.id
+               LEFT JOIN delivery_evidences de ON de.delivery_id = di.delivery_id
                WHERE bb.guardian_id = $1
                ORDER BY s.paternal_last_name, bt.name`,
               [guardian.id]
@@ -507,6 +528,8 @@ app.get(
                 benefitName: b.benefit_name,
                 status: b.status,
                 deliveredAt: b.delivered_at,
+                evidenceId: b.evidence_id,
+                fotoActa: b.evidence_id ? `/api/evidences/${b.evidence_id}/file` : null,
                 student: {
                   rut: b.student_rut,
                   fullName: fullName(b.first_name, b.paternal_last_name, b.maternal_last_name),
@@ -634,13 +657,22 @@ app.post(
       const deliveryDate = new Date().toISOString();
       const deliveredBenefits = [];
 
-      // Actualizar en PostgreSQL si está disponible
+      // Actualizar en PostgreSQL con persistencia BYTEA de la foto
+      let pgEvidenceId = null;
       if (usePostgres) {
         const client = await pool.connect();
         try {
           await client.query("BEGIN");
-          const gRes = await client.query("SELECT id FROM guardians WHERE rut = $1", [rutValidation.rut]);
-          const guardianId = gRes.rows[0]?.id;
+          let gRes = await client.query("SELECT id FROM guardians WHERE rut = $1", [rutValidation.rut]);
+          let guardianId = gRes.rows[0]?.id;
+
+          if (!guardianId) {
+            const cleanG = await client.query(
+              "SELECT id FROM guardians WHERE REPLACE(REPLACE(rut, '.', ''), '-', '') = $1",
+              [rutValidation.clean]
+            );
+            guardianId = cleanG.rows[0]?.id;
+          }
 
           const delRes = await client.query(
             `INSERT INTO deliveries (guardian_id, delivered_by, notes, delivered_at)
@@ -649,18 +681,37 @@ app.post(
           );
           const deliveryId = delRes.rows[0].id;
 
+          // Guardar imagen directamente en PostgreSQL (columna file_data BYTEA)
           const evRes = await client.query(
-            `INSERT INTO delivery_evidences (delivery_id, guardian_id, logical_file_name, storage_key, mime_type, file_size_bytes, file_hash_sha256)
-             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-            [deliveryId, guardianId, filename, filename, req.file.mimetype, req.file.size, sha256(req.file.buffer)]
+            `INSERT INTO delivery_evidences (delivery_id, guardian_id, logical_file_name, storage_key, mime_type, file_size_bytes, file_hash_sha256, file_data)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+            [
+              deliveryId,
+              guardianId,
+              filename,
+              filename,
+              req.file.mimetype,
+              req.file.size,
+              sha256(req.file.buffer),
+              req.file.buffer, // Persistencia binaria garantizada en Render Postgres
+            ]
           );
-          const evidenceId = evRes.rows[0].id;
+          pgEvidenceId = evRes.rows[0].id;
 
           for (const bId of benefitIds) {
+            // Relacionar entrega con el beneficio en delivery_items
             await client.query(
-              `UPDATE beneficiary_benefits SET status = 'DELIVERED', delivered_at = CURRENT_TIMESTAMP
-               WHERE id = $1`,
-              [bId]
+              `INSERT INTO delivery_items (delivery_id, beneficiary_benefit_id)
+               VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+              [deliveryId, bId]
+            );
+
+            // Actualizar estado del beneficio y vincular ID de evidencia
+            await client.query(
+              `UPDATE beneficiary_benefits 
+               SET status = 'DELIVERED', delivered_at = CURRENT_TIMESTAMP, evidence_id = $1
+               WHERE id = $2`,
+              [pgEvidenceId, bId]
             );
           }
 
@@ -673,11 +724,12 @@ app.post(
         }
       }
 
-      // Actualizar en memoria
-      const evidenceId = `ev-${Date.now()}`;
+      // Actualizar en memoria (soporta buffer para despliegues sin disco)
+      const evidenceId = pgEvidenceId || `ev-${Date.now()}`;
       memoryStore.evidences.set(evidenceId, {
         id: evidenceId,
         filename,
+        buffer: req.file.buffer,
         path: destination,
         mimetype: req.file.mimetype,
         size: req.file.size,
@@ -786,55 +838,113 @@ app.get(
   "/api/beneficiaries",
   authenticateToken,
   requireRoles("ADMIN", "FIELD_AGENT"),
-  (req, res) => {
+  async (req, res) => {
     try {
       const search = cleanText(req.query.search).toLowerCase();
       const estado = cleanText(req.query.estado).toUpperCase();
 
       let results = [];
-      for (const b of memoryStore.benefits.values()) {
-        const guardian = memoryStore.guardians.get(b.guardianRut);
-        const student = memoryStore.students.get(b.studentRut);
 
-        const row = {
-          id: b.id,
-          rut_apoderado: guardian ? guardian.rut : b.guardianRut,
-          nombre_apoderado: guardian ? guardian.fullName : "",
-          direccion: guardian ? guardian.address : "",
-          sector: guardian ? guardian.sector : "CENTRO",
-          telefono_apoderado: guardian ? guardian.phone : "",
-          correo_apoderado: guardian ? guardian.email : "",
-          rut_alumno: student ? student.rut : b.studentRut,
-          nombre_alumno: student ? student.fullName : "",
-          establecimiento: student ? student.establishment : "",
-          nivel_educacional: student ? student.educationalLevel : "",
-          estado: student ? student.state : "APROBADA",
-          beneficio_nombre: b.benefitName,
-          entregado: b.status === "DELIVERED",
-          fecha_entrega: b.deliveredAt,
-          foto_acta: b.evidenceId ? `/api/evidences/${b.evidenceId}/file` : null,
-        };
+      // Si PostgreSQL está activo, consultar directamente a la base de datos
+      if (usePostgres) {
+        try {
+          const dbRes = await pool.query(`
+            SELECT 
+              bb.id,
+              g.rut AS rut_apoderado,
+              g.first_name || ' ' || COALESCE(g.paternal_last_name, '') || ' ' || COALESCE(g.maternal_last_name, '') AS nombre_apoderado,
+              g.address AS direccion,
+              COALESCE(g.sector, 'CENTRO') AS sector,
+              g.phone AS telefono_apoderado,
+              g.email AS correo_apoderado,
+              s.rut AS rut_alumno,
+              s.first_name || ' ' || COALESCE(s.paternal_last_name, '') || ' ' || COALESCE(s.maternal_last_name, '') AS nombre_alumno,
+              s.establishment AS establecimiento,
+              s.educational_level AS nivel_educacional,
+              COALESCE(s.application_status, 'APROBADA') AS estado,
+              bt.name AS beneficio_nombre,
+              (bb.status = 'DELIVERED') AS entregado,
+              TO_CHAR(bb.delivered_at, 'YYYY-MM-DD HH24:MI:SS') AS fecha_entrega,
+              COALESCE(bb.evidence_id, de.id) AS evidence_id
+            FROM beneficiary_benefits bb
+            JOIN guardians g ON bb.guardian_id = g.id
+            JOIN students s ON bb.student_id = s.id
+            JOIN benefit_types bt ON bb.benefit_type_id = bt.id
+            LEFT JOIN delivery_items di ON di.beneficiary_benefit_id = bb.id
+            LEFT JOIN delivery_evidences de ON de.delivery_id = di.delivery_id
+            ORDER BY bb.created_at DESC
+          `);
 
-        // Filtro de búsqueda
-        if (search) {
-          const match =
-            row.nombre_apoderado.toLowerCase().includes(search) ||
-            row.nombre_alumno.toLowerCase().includes(search) ||
-            cleanRut(row.rut_apoderado).includes(cleanRut(search)) ||
-            cleanRut(row.rut_alumno).includes(cleanRut(search));
-          if (!match) continue;
+          results = dbRes.rows.map((row) => ({
+            id: row.id,
+            rut_apoderado: row.rut_apoderado,
+            nombre_apoderado: row.nombre_apoderado.trim(),
+            direccion: row.direccion,
+            sector: row.sector,
+            telefono_apoderado: row.telefono_apoderado,
+            correo_apoderado: row.correo_apoderado,
+            rut_alumno: row.rut_alumno,
+            nombre_alumno: row.nombre_alumno.trim(),
+            establecimiento: row.establecimiento,
+            nivel_educacional: row.nivel_educacional,
+            estado: row.estado,
+            beneficio_nombre: row.beneficio_nombre,
+            entregado: Boolean(row.entregado),
+            fecha_entrega: row.fecha_entrega,
+            foto_acta: row.evidence_id ? `/api/evidences/${row.evidence_id}/file` : null,
+          }));
+        } catch (dbErr) {
+          console.warn("[DB] Falló consulta en PostgreSQL /api/beneficiaries, usando memoria:", dbErr.message);
         }
-
-        // Filtro de estado
-        if (estado && estado !== "TODOS") {
-          if (estado === "ENTREGADO" && !row.entregado) continue;
-          if (estado === "PENDIENTE" && row.entregado) continue;
-        }
-
-        results.push(row);
       }
 
-      return res.json(results);
+      // Fallback a memoryStore si PostgreSQL no devolvió registros
+      if (results.length === 0) {
+        for (const b of memoryStore.benefits.values()) {
+          const guardian = memoryStore.guardians.get(b.guardianRut);
+          const student = memoryStore.students.get(b.studentRut);
+
+          results.push({
+            id: b.id,
+            rut_apoderado: guardian ? guardian.rut : b.guardianRut,
+            nombre_apoderado: guardian ? guardian.fullName : "",
+            direccion: guardian ? guardian.address : "",
+            sector: guardian ? guardian.sector : "CENTRO",
+            telefono_apoderado: guardian ? guardian.phone : "",
+            correo_apoderado: guardian ? guardian.email : "",
+            rut_alumno: student ? student.rut : b.studentRut,
+            nombre_alumno: student ? student.fullName : "",
+            establecimiento: student ? student.establishment : "",
+            nivel_educacional: student ? student.educationalLevel : "",
+            estado: student ? student.state : "APROBADA",
+            beneficio_nombre: b.benefitName,
+            entregado: b.status === "DELIVERED",
+            fecha_entrega: b.deliveredAt,
+            foto_acta: b.evidenceId ? `/api/evidences/${b.evidenceId}/file` : null,
+          });
+        }
+      }
+
+      // Filtro de búsqueda y estado
+      let filtered = results;
+      if (search) {
+        filtered = filtered.filter((row) =>
+          (row.nombre_apoderado || "").toLowerCase().includes(search) ||
+          (row.nombre_alumno || "").toLowerCase().includes(search) ||
+          cleanRut(row.rut_apoderado).includes(cleanRut(search)) ||
+          cleanRut(row.rut_alumno).includes(cleanRut(search))
+        );
+      }
+
+      if (estado && estado !== "TODOS") {
+        if (estado === "ENTREGADO") {
+          filtered = filtered.filter((r) => r.entregado);
+        } else if (estado === "PENDIENTE") {
+          filtered = filtered.filter((r) => !r.entregado);
+        }
+      }
+
+      return res.json(filtered);
     } catch (error) {
       return res.status(500).json({ message: "Error al listar beneficiarios.", error: error.message });
     }
@@ -1007,12 +1117,44 @@ app.post("/api/admin/reset-database", authenticateToken, requireRoles("ADMIN"), 
   }
 });
 
-// 9. OBTENER ARCHIVO DE EVIDENCIA
-app.get("/api/evidences/:id/file", (req, res) => {
-  const ev = memoryStore.evidences.get(req.params.id);
-  if (ev && fs.existsSync(ev.path)) {
-    return res.sendFile(ev.path);
+// 9. OBTENER ARCHIVO DE EVIDENCIA (Foto del acta física firmada)
+app.get("/api/evidences/:id/file", async (req, res) => {
+  const { id } = req.params;
+
+  // 1. Si PostgreSQL está activo, buscar la imagen en BYTEA
+  if (usePostgres) {
+    try {
+      const dbRes = await pool.query(
+        "SELECT mime_type, file_data, logical_file_name FROM delivery_evidences WHERE id = $1",
+        [id]
+      );
+      if (dbRes.rows.length > 0 && dbRes.rows[0].file_data) {
+        const row = dbRes.rows[0];
+        res.setHeader("Content-Type", row.mime_type || "image/jpeg");
+        res.setHeader("Cache-Control", "public, max-age=86400"); // Cache de 24 horas para velocidad
+        res.setHeader(
+          "Content-Disposition",
+          `inline; filename="${row.logical_file_name || 'acta_entrega.jpg'}"`
+        );
+        return res.send(row.file_data);
+      }
+    } catch (dbErr) {
+      console.warn("[DB] Error recuperando evidencia desde PostgreSQL:", dbErr.message);
+    }
   }
+
+  // 2. Fallback a memoria o disco local
+  const ev = memoryStore.evidences.get(id);
+  if (ev) {
+    res.setHeader("Content-Type", ev.mimetype || "image/jpeg");
+    if (ev.buffer) {
+      return res.send(ev.buffer);
+    }
+    if (ev.path && fs.existsSync(ev.path)) {
+      return res.sendFile(ev.path);
+    }
+  }
+
   return res.status(404).json({ message: "Evidencia fotográfica no encontrada." });
 });
 
