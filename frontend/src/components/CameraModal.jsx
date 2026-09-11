@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { compressImage } from '../utils/imageUtils';
 
 export default function CameraModal({ isOpen, onClose, onPhotoCaptured }) {
   const [stream, setStream] = useState(null);
@@ -194,30 +195,44 @@ export default function CameraModal({ isOpen, onClose, onPhotoCaptured }) {
     canvas.toBlob(
       (blob) => {
         if (!blob) return;
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
         const file = new File([blob], `acta_firmada_${Date.now()}.jpg`, { type: 'image/jpeg' });
         setCapturedPhoto({ file, dataUrl });
         detenerCamara();
       },
       'image/jpeg',
-      0.92
+      0.85
     );
   };
 
-  // Manejar selección de foto desde archivo o cámara nativa
-  const handleFileSelected = (e) => {
+  // Manejar selección de foto desde archivo o cámara nativa con compresión automática
+  const handleFileSelected = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
+    try {
+      setIsInitializing(true);
+      const compressed = await compressImage(file, 1600, 0.85);
       setCapturedPhoto({
-        file,
-        dataUrl: event.target.result,
+        file: compressed.file,
+        dataUrl: compressed.dataUrl,
       });
       detenerCamara();
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      console.warn('Error comprimiendo imagen:', err);
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setCapturedPhoto({
+          file,
+          dataUrl: event.target.result,
+        });
+        detenerCamara();
+      };
+      reader.readAsDataURL(file);
+    } finally {
+      setIsInitializing(false);
+      if (e.target) e.target.value = '';
+    }
   };
 
   const repetirFoto = () => {

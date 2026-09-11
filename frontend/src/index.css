@@ -1001,6 +1001,64 @@ body {
   font-size: 0.9rem;
   font-weight: 700;
 }
+.attached-actions-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.camera-choice-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 640px) {
+  .camera-choice-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.camera-dropzone-file {
+  border-color: #6366f1;
+  background: #f5f3ff;
+}
+.camera-dropzone-file:hover {
+  background: #ede9fe;
+  border-color: #4f46e5;
+}
+.file-icon {
+  font-size: 1.5rem;
+}
+
+.status-hint-badge {
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  font-size: 0.88rem;
+  font-weight: 600;
+  margin-top: 14px;
+  margin-bottom: 4px;
+  text-align: center;
+  border: 1px solid transparent;
+}
+.status-hint-success {
+  background: #f0fdf4;
+  color: #166534;
+  border-color: #bbf7d0;
+}
+.status-hint-warning {
+  background: #fffbeb;
+  color: #92400e;
+  border-color: #fde68a;
+}
+.status-hint-info {
+  background: #eff6ff;
+  color: #1e40af;
+  border-color: #bfdbfe;
+}
+.status-hint-ready {
+  background: #f0fdf4;
+  color: #15803d;
+  border-color: #86efac;
+}
 
 /* ==========================================================================
    MODAL DE CÁMARA WEBRTC
