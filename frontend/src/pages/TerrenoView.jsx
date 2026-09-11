@@ -25,6 +25,7 @@ export default function TerrenoView() {
   const [entregaExitosaData, setEntregaExitosaData] = useState(null);
 
   const inputRef = useRef(null);
+  const isSubmittingRef = useRef(false);
 
   // Manejar escritura de RUT con formateo dinámico
   function handleRutChange(e) {
@@ -107,6 +108,8 @@ export default function TerrenoView() {
   }
 
   async function handleRegistrarEntrega() {
+    if (isSubmittingRef.current || loading) return;
+
     if (checkedBenefitIds.size === 0) {
       alert('Debe marcar al menos un beneficio con el checkbox para realizar la entrega.');
       return;
@@ -117,6 +120,7 @@ export default function TerrenoView() {
       return;
     }
 
+    isSubmittingRef.current = true;
     setLoading(true);
     try {
       const benefitIdsArray = Array.from(checkedBenefitIds);
@@ -172,6 +176,7 @@ export default function TerrenoView() {
       alert('Error al registrar entrega: ' + err.message);
     } finally {
       setLoading(false);
+      isSubmittingRef.current = false;
     }
   }
 
@@ -233,14 +238,15 @@ export default function TerrenoView() {
 
           {searchError && <div className="terreno-msg-error">⚠️ {searchError}</div>}
 
-          {/* Tips de búsqueda rápida con datos de ejemplo */}
+          {/* Tips de búsqueda rápida con datos de la planilla */}
           <div style={{ marginTop: '1.5rem', padding: '1rem', background: '#f8fafc', borderRadius: '8px', fontSize: '0.85rem', color: '#64748b' }}>
-            <p style={{ margin: '0 0 0.5rem 0', fontWeight: 'bold' }}>💡 RUTs de ejemplo cargados para pruebas:</p>
+            <p style={{ margin: '0 0 0.5rem 0', fontWeight: 'bold' }}>💡 RUTs de beneficiarios (Planilla Excel):</p>
             <ul style={{ margin: 0, paddingLeft: '1.2rem', lineHeight: '1.5' }}>
-              <li><code>15.892.415-3</code> — Carolina Montero (Belloto Centro - 2 cargas escolares para entrega múltiple)</li>
-              <li><code>17.456.789-1</code> — Marcela Araya (Pompeya - 3 cargas escolares)</li>
-              <li><code>16.234.567-2</code> — Roberto González (Quilpué Centro - 1 estudiante)</li>
-              <li><code>14.567.890-0</code> — Mauricio Vera (Valencia - Ya entregado previamente)</li>
+              <li><code>15.234.567-8</code> — Juan Pérez Gómez (Alumno: Pedro Pérez Díaz - Quilpué Centro)</li>
+              <li><code>12.876.543-2</code> — Ana Silva Rojas (Alumna: Sofía Muñoz Silva - Belloto Norte)</li>
+              <li><code>16.432.109-7</code> — Carlos Valenzuela Soto (Alumno: Lucas Valenzuela Castro)</li>
+              <li><code>17.890.123-4</code> — Luis Castro Romero (Mesa 3 - 12:00)</li>
+              <li><code>14.567.890-0</code> — Mauricio Vera (Ya entregado previamente)</li>
             </ul>
           </div>
         </div>

@@ -187,65 +187,388 @@ const memoryStore = {
   evidences: new Map(),
 };
 
-// Cargar datos iniciales de Quilpué en el almacén de memoria
-function loadSeedDataToMemory() {
-  const seedFile = path.join(__dirname, "data", "seedData.json");
-  if (!fs.existsSync(seedFile)) return;
-  try {
-    memoryStore.guardians.clear();
-    memoryStore.students.clear();
-    memoryStore.benefits.clear();
-    memoryStore.deliveries.clear();
-    memoryStore.evidences.clear();
+// Helpers para parsear fechas, horas y planillas Excel
+function parseExcelDate(val) {
+  if (!val || val === "-" || val === "null" || val === "undefined") return null;
+  if (typeof val === "number") {
+    const d = new Date(Math.round((val - 25569) * 86400 * 1000));
+    return isNaN(d.getTime()) ? null : d.toISOString().split("T")[0];
+  }
+  const str = String(val).trim();
+  if (str === "" || str === "-") return null;
+  return str;
+}
 
-    const raw = fs.readFileSync(seedFile, "utf-8");
-    const items = JSON.parse(raw);
-    items.forEach((item, idx) => {
-      const gRut = formatRut(cleanRut(item.rut_apoderado));
-      const sRut = formatRut(cleanRut(item.rut_alumno));
-      let guardian = memoryStore.guardians.get(gRut);
+function parseExcelTime(val) {
+  if (!val || val === "-") return "";
+  if (typeof val === "number") {
+    const totalSeconds = Math.round(val * 86400);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+  }
+  return String(val).trim();
+}
+
+function findExcelFile() {
+  const candidates = [
+    path.join(__dirname, "data", "formulario_postulantes.xlsx"),
+    path.join(__dirname, "..", "formulario_postulantes.xlsx"),
+    path.join(__dirname, "formulario_postulantes.xlsx"),
+    path.join(__dirname, "data", "formulario_estudiantes.xlsx"),
+    path.join(__dirname, "..", "formulario_estudiantes.xlsx"),
+  ];
+
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+
+  const searchDirs = [path.join(__dirname, ".."), __dirname, path.join(__dirname, "data")];
+  for (const dir of searchDirs) {
+    if (fs.existsSync(dir)) {
+      try {
+        const files = fs.readdirSync(dir);
+        const match = files.find((f) => /postulante|estudiante|formulario/i.test(f) && /\.xlsx?$/i.test(f));
+        if (match) return path.join(dir, match);
+      } catch (e) {}
+    }
+  }
+  return null;
+}
+
+function parseExcelBeneficiaries(bufferOrPath) {
+  let workbook;
+  if (Buffer.isBuffer(bufferOrPath)) {
+    workbook = xlsx.read(bufferOrPath, { type: "buffer" });
+  } else {
+    workbook = xlsx.readFile(bufferOrPath);
+  }
+  const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+  const rows = xlsx.utils.sheet_to_json(firstSheet, { defval: "" });
+
+  const results = [];
+  const errors = [];
+
+  rows.forEach((row, idx) => {
+    const rawApoderado =
+      row["Rut_Apoderado"] ||
+      row["RUT_Apoderado"] ||
+      row["rut_apoderado"] ||
+      row["Rut Apoderado"] ||
+      row["RUT Apoderado"];
+
+    const rawAlumno =
+      row["Rut_Alumno"] ||
+      row["RUT_Alumno"] ||
+      row["rut_alumno"] ||
+      row["Rut Alumno"] ||
+      row["RUT Alumno"];
+
+    if (!rawApoderado || !rawAlumno) {
+      errors.push({ fila: idx + 2, error: "Faltan RUT de apoderado o alumno" });
+      return;
+    }
+
+    const gRut = formatRut(cleanRut(rawApoderado));
+    const sRut = formatRut(cleanRut(rawAlumno));
+
+    const gFirstName = cleanText(row["Nombre_Apoderado"] || row["Nombre Apoderado"] || "Apoderado");
+    const gPatLastName = cleanText(row["Apellido_Paterno_Apoderado"] || row["Apellido Paterno Apoderado"] || "");
+    const gMatLastName = cleanText(row["Apellido_Materno_Apoderado"] || row["Apellido Materno Apoderado"] || "");
+    const gFullName = [gFirstName, gPatLastName, gMatLastName].filter(Boolean).join(" ").trim() || "Apoderado";
+
+    const sFirstName = cleanText(row["Nombre_Alumno"] || row["Nombre Alumno"] || "Alumno");
+    const sPatLastName = cleanText(row["Apellido_Paterno_Alumno"] || row["Apellido Paterno Alumno"] || "");
+    const sMatLastName = cleanText(row["Apellido_Materno_Alumno"] || row["Apellido Materno Alumno"] || "");
+    const sFullName = [sFirstName, sPatLastName, sMatLastName].filter(Boolean).join(" ").trim() || "Alumno";
+
+    const gBirthDate = parseExcelDate(row["Fecha_Nacimiento_Apoderado"] || row["Fecha Nacimiento Apoderado"]);
+    const gAddress = cleanText(row["Direccion"] || row["Dirección"] || "Quilpué");
+    const gSector = cleanText(row["Sector"] || "CENTRO").toUpperCase();
+    const gEmail = cleanText(row["Correo_Apoderado"] || row["Correo Apoderado"] || row["Email"] || "");
+    const gPhone = cleanText(row["Telefono_Apoderado"] || row["Telefono Apoderado"] || row["Teléfono"] || "");
+
+    const sEstablishment = cleanText(row["Establecimiento"] || row["Colegio"] || "Establecimiento Quilpué");
+    const sLevel = cleanText(row["Nivel_Educacional"] || row["Nivel Educacional"] || row["Nivel"] || "Básica");
+    const sStatus = cleanText(row["Estado"] || "APROBADA").toUpperCase();
+    const fibeBenefited = String(row["FIBE_Beneficiado"] || row["FIBE"] || "").toLowerCase().startsWith("s");
+    const renewal = cleanText(row["Renovacion_automatica"] || row["Renovación automática"] || "No");
+
+    const deliveryDay = cleanText(row["dia"] || row["Día"] || "");
+    const deliveryTime = parseExcelTime(row["hora"] || row["Hora"]);
+    const deliveryTable = cleanText(row["mesa"] || row["Mesa"] || "");
+    const fechaEntrega = parseExcelDate(row["Fecha_entrega"] || row["Fecha entrega"] || row["Fecha Entrega"]);
+    const deliveredBy = cleanText(row["entregado_por"] || row["Entregado por"] || "");
+
+    const isDelivered = !!fechaEntrega && fechaEntrega !== "-";
+    const benefitName = sLevel.toLowerCase().includes("media")
+      ? "Set Escolar 2026 - MEDIA"
+      : "Set Escolar 2026 - BÁSICA";
+
+    results.push({
+      guardian: {
+        rut: gRut,
+        firstName: gFirstName,
+        paternalLastName: gPatLastName,
+        maternalLastName: gMatLastName,
+        fullName: gFullName,
+        birthDate: gBirthDate,
+        address: gAddress,
+        sector: gSector,
+        email: gEmail,
+        phone: gPhone,
+      },
+      student: {
+        rut: sRut,
+        guardianRut: gRut,
+        firstName: sFirstName,
+        paternalLastName: sPatLastName,
+        maternalLastName: sMatLastName,
+        fullName: sFullName,
+        establishment: sEstablishment,
+        educationalLevel: sLevel,
+        state: sStatus,
+        fibeBenefited,
+        renewal,
+        deliveryDay,
+        deliveryTime,
+        deliveryTable,
+        importedDeliveryDate: fechaEntrega,
+        importedDeliveredBy: deliveredBy,
+      },
+      benefit: {
+        name: benefitName,
+        status: isDelivered ? "DELIVERED" : "PENDING",
+        deliveredAt: fechaEntrega,
+        deliveredBy: isDelivered ? deliveredBy : null,
+      },
+    });
+  });
+
+  return { results, errors, totalRows: rows.length };
+}
+
+// Cargar en memoryStore evitando duplicados
+function loadExcelToMemory(excelPath) {
+  try {
+    const { results } = parseExcelBeneficiaries(excelPath);
+    results.forEach((item) => {
+      let guardian = memoryStore.guardians.get(item.guardian.rut);
       if (!guardian) {
         guardian = {
-          id: `g-${idx}`,
-          rut: gRut,
-          fullName: item.nombre_apoderado || "Apoderado",
-          address: item.direccion || "Quilpué",
-          sector: item.sector || "CENTRO",
-          email: item.correo_apoderado || "",
-          phone: item.telefono_apoderado || "",
+          id: `g-xl-${cleanRut(item.guardian.rut)}`,
+          ...item.guardian,
         };
-        memoryStore.guardians.set(gRut, guardian);
+        memoryStore.guardians.set(item.guardian.rut, guardian);
       }
 
-      const studentId = `s-${idx}`;
+      const studentId = `s-xl-${cleanRut(item.student.rut)}`;
       const student = {
         id: studentId,
         guardianId: guardian.id,
-        guardianRut: gRut,
-        rut: sRut,
-        fullName: item.nombre_alumno || "Alumno",
-        establishment: item.establecimiento || "Establecimiento Quilpué",
-        educationalLevel: item.nivel_educacional || "Básica",
-        state: item.estado || "APROBADA",
+        ...item.student,
       };
-      memoryStore.students.set(sRut, student);
+      memoryStore.students.set(item.student.rut, student);
 
-      const benefitId = `b-${idx}`;
+      const benefitId = `b-xl-${cleanRut(item.student.rut)}`;
       memoryStore.benefits.set(benefitId, {
         id: benefitId,
         guardianId: guardian.id,
-        guardianRut: gRut,
+        guardianRut: item.guardian.rut,
         studentId: studentId,
-        studentRut: sRut,
-        benefitName: item.beneficio_nombre || "Set Escolar 2026",
-        status: item.entregado ? "DELIVERED" : "PENDING",
-        deliveredAt: item.fecha_entrega || null,
+        studentRut: item.student.rut,
+        benefitName: item.benefit.name,
+        status: item.benefit.status,
+        deliveredAt: item.benefit.deliveredAt,
         evidenceId: null,
       });
     });
-    console.log(`[DATA] Cargados ${memoryStore.benefits.size} beneficios en el almacén integrado.`);
+    console.log(`[DATA] Cargados ${results.length} beneficiarios desde planilla Excel (${path.basename(excelPath)}) en memoria.`);
+    return true;
   } catch (err) {
-    console.warn("[DATA] Error cargando seedData.json:", err.message);
+    console.warn("[DATA] Error al parsear planilla Excel inicial:", err.message);
+    return false;
+  }
+}
+
+// Sincronizar beneficiarios en PostgreSQL usando UPSERT seguro
+async function syncDataToPostgres(client, parsedItems) {
+  for (const item of parsedItems) {
+    // 1. Tipo de beneficio
+    const btRes = await client.query(
+      `INSERT INTO benefit_types (name) VALUES ($1)
+       ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id;`,
+      [item.benefit.name]
+    );
+    const benefitTypeId = btRes.rows[0].id;
+
+    // 2. Apoderado
+    const gRes = await client.query(
+      `INSERT INTO guardians (rut, first_name, paternal_last_name, maternal_last_name, birth_date, address, sector, email, phone)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       ON CONFLICT (rut) DO UPDATE SET
+         first_name = EXCLUDED.first_name,
+         paternal_last_name = EXCLUDED.paternal_last_name,
+         maternal_last_name = EXCLUDED.maternal_last_name,
+         birth_date = COALESCE(EXCLUDED.birth_date, guardians.birth_date),
+         address = COALESCE(EXCLUDED.address, guardians.address),
+         sector = COALESCE(EXCLUDED.sector, guardians.sector),
+         email = COALESCE(EXCLUDED.email, guardians.email),
+         phone = COALESCE(EXCLUDED.phone, guardians.phone),
+         updated_at = CURRENT_TIMESTAMP
+       RETURNING id;`,
+      [
+        item.guardian.rut,
+        item.guardian.firstName,
+        item.guardian.paternalLastName,
+        item.guardian.maternalLastName,
+        item.guardian.birthDate,
+        item.guardian.address,
+        item.guardian.sector,
+        item.guardian.email,
+        item.guardian.phone,
+      ]
+    );
+    const guardianId = gRes.rows[0].id;
+
+    // 3. Estudiante
+    const sRes = await client.query(
+      `INSERT INTO students (
+         guardian_id, rut, first_name, paternal_last_name, maternal_last_name,
+         establishment, educational_level, fibe_benefited, automatic_renewal,
+         application_status, delivery_day, delivery_time, delivery_table,
+         imported_delivery_date, imported_delivered_by
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+       ON CONFLICT (rut) DO UPDATE SET
+         guardian_id = EXCLUDED.guardian_id,
+         first_name = EXCLUDED.first_name,
+         paternal_last_name = EXCLUDED.paternal_last_name,
+         maternal_last_name = EXCLUDED.maternal_last_name,
+         establishment = EXCLUDED.establishment,
+         educational_level = EXCLUDED.educational_level,
+         fibe_benefited = EXCLUDED.fibe_benefited,
+         automatic_renewal = EXCLUDED.automatic_renewal,
+         application_status = EXCLUDED.application_status,
+         delivery_day = EXCLUDED.delivery_day,
+         delivery_time = EXCLUDED.delivery_time,
+         delivery_table = EXCLUDED.delivery_table,
+         imported_delivery_date = EXCLUDED.imported_delivery_date,
+         imported_delivered_by = EXCLUDED.imported_delivered_by,
+         updated_at = CURRENT_TIMESTAMP
+       RETURNING id;`,
+      [
+        guardianId,
+        item.student.rut,
+        item.student.firstName,
+        item.student.paternalLastName,
+        item.student.maternalLastName,
+        item.student.establishment,
+        item.student.educationalLevel,
+        item.student.fibeBenefited,
+        item.student.renewal,
+        item.student.state,
+        item.student.deliveryDay,
+        item.student.deliveryTime,
+        item.student.deliveryTable,
+        item.student.importedDeliveryDate,
+        item.student.importedDeliveredBy,
+      ]
+    );
+    const studentId = sRes.rows[0].id;
+
+    // 4. Beneficio
+    await client.query(
+      `INSERT INTO beneficiary_benefits (guardian_id, student_id, benefit_type_id, status, delivered_at)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (student_id, benefit_type_id) DO UPDATE SET
+         guardian_id = EXCLUDED.guardian_id,
+         status = CASE WHEN beneficiary_benefits.status = 'DELIVERED' THEN 'DELIVERED' ELSE EXCLUDED.status END,
+         delivered_at = CASE WHEN beneficiary_benefits.status = 'DELIVERED' THEN beneficiary_benefits.delivered_at ELSE EXCLUDED.delivered_at END,
+         updated_at = CURRENT_TIMESTAMP
+       RETURNING id;`,
+      [
+        guardianId,
+        studentId,
+        benefitTypeId,
+        item.benefit.status,
+        item.benefit.deliveredAt ? new Date(item.benefit.deliveredAt) : null,
+      ]
+    );
+  }
+}
+
+// Cargar datos iniciales en el almacén de memoria
+function loadSeedDataToMemory() {
+  memoryStore.guardians.clear();
+  memoryStore.students.clear();
+  memoryStore.benefits.clear();
+  memoryStore.deliveries.clear();
+  memoryStore.evidences.clear();
+
+  // 1. Priorizar planilla Excel del proyecto si existe
+  const excelFile = findExcelFile();
+  let loadedFromExcel = false;
+  if (excelFile) {
+    loadedFromExcel = loadExcelToMemory(excelFile);
+  }
+
+  // 2. Si no hay planilla Excel o para complementar, cargar seedData.json
+  const seedFile = path.join(__dirname, "data", "seedData.json");
+  if (fs.existsSync(seedFile)) {
+    try {
+      const raw = fs.readFileSync(seedFile, "utf-8");
+      const items = JSON.parse(raw);
+      items.forEach((item, idx) => {
+        const gRut = formatRut(cleanRut(item.rut_apoderado));
+        const sRut = formatRut(cleanRut(item.rut_alumno));
+
+        let guardian = memoryStore.guardians.get(gRut);
+        if (!guardian) {
+          guardian = {
+            id: `g-seed-${idx}`,
+            rut: gRut,
+            fullName: item.nombre_apoderado || "Apoderado",
+            address: item.direccion || "Quilpué",
+            sector: item.sector || "CENTRO",
+            email: item.correo_apoderado || "",
+            phone: item.telefono_apoderado || "",
+          };
+          memoryStore.guardians.set(gRut, guardian);
+        }
+
+        let student = memoryStore.students.get(sRut);
+        if (!student) {
+          const studentId = `s-seed-${idx}`;
+          student = {
+            id: studentId,
+            guardianId: guardian.id,
+            guardianRut: gRut,
+            rut: sRut,
+            fullName: item.nombre_alumno || "Alumno",
+            establishment: item.establecimiento || "Establecimiento Quilpué",
+            educationalLevel: item.nivel_educacional || "Básica",
+            state: item.estado || "APROBADA",
+          };
+          memoryStore.students.set(sRut, student);
+
+          const benefitId = `b-seed-${idx}`;
+          memoryStore.benefits.set(benefitId, {
+            id: benefitId,
+            guardianId: guardian.id,
+            guardianRut: gRut,
+            studentId: studentId,
+            studentRut: sRut,
+            benefitName: item.beneficio_nombre || "Set Escolar 2026",
+            status: item.entregado ? "DELIVERED" : "PENDING",
+            deliveredAt: item.fecha_entrega || null,
+            evidenceId: null,
+          });
+        }
+      });
+      console.log(`[DATA] Almacén en memoria consolidado con ${memoryStore.benefits.size} beneficios.`);
+    } catch (err) {
+      console.warn("[DATA] Error cargando seedData.json:", err.message);
+    }
   }
 }
 
@@ -293,63 +616,71 @@ async function initDatabase() {
       [terrenoHash]
     );
 
-    // Si la tabla guardians está vacía, poblar desde seedData.json
-    const countRes = await client.query("SELECT COUNT(*) FROM guardians");
-    if (Number(countRes.rows[0].count) === 0) {
-      console.log("[DB] Población inicial de beneficiarios en PostgreSQL...");
-      const defaultBenefit = await client.query(
-        `INSERT INTO benefit_types (name) VALUES ('Set Escolar 2026')
-         ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id;`
-      );
-      const benefitTypeId = defaultBenefit.rows[0].id;
-
-      for (const guardian of memoryStore.guardians.values()) {
-        const parts = guardian.fullName.split(" ");
-        const fName = parts[0] || "Nombre";
-        const pLast = parts[1] || "";
-        const mLast = parts.slice(2).join(" ") || "";
-
-        const gRes = await client.query(
-          `INSERT INTO guardians (rut, first_name, paternal_last_name, maternal_last_name, address, sector, email, phone)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-           ON CONFLICT (rut) DO UPDATE SET address = EXCLUDED.address RETURNING id;`,
-          [guardian.rut, fName, pLast, mLast, guardian.address, guardian.sector, guardian.email, guardian.phone]
+    // Sincronizar datos del Excel o seed en PostgreSQL
+    const excelFile = findExcelFile();
+    if (excelFile) {
+      console.log(`[DB] Sincronizando padrón comunal desde ${path.basename(excelFile)} a PostgreSQL...`);
+      const { results } = parseExcelBeneficiaries(excelFile);
+      await syncDataToPostgres(client, results);
+      console.log(`[DB] ¡${results.length} beneficiarios del Excel sincronizados en PostgreSQL exitosamente!`);
+    } else {
+      // Si no hay Excel, sincronizar desde seedData.json si la tabla está vacía
+      const countRes = await client.query("SELECT COUNT(*) FROM guardians");
+      if (Number(countRes.rows[0].count) === 0) {
+        console.log("[DB] Población inicial de beneficiarios en PostgreSQL desde memoria...");
+        const defaultBenefit = await client.query(
+          `INSERT INTO benefit_types (name) VALUES ('Set Escolar 2026')
+           ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id;`
         );
-        const gId = gRes.rows[0].id;
+        const benefitTypeId = defaultBenefit.rows[0].id;
 
-        // Estudiantes asociados
-        for (const student of memoryStore.students.values()) {
-          if (student.guardianRut === guardian.rut) {
-            const sParts = student.fullName.split(" ");
-            const sfName = sParts[0] || "Alumno";
-            const spLast = sParts[1] || "";
-            const smLast = sParts.slice(2).join(" ") || "";
+        for (const guardian of memoryStore.guardians.values()) {
+          const parts = (guardian.fullName || "").split(" ");
+          const fName = parts[0] || "Nombre";
+          const pLast = parts[1] || "";
+          const mLast = parts.slice(2).join(" ") || "";
 
-            const sRes = await client.query(
-              `INSERT INTO students (guardian_id, rut, first_name, paternal_last_name, maternal_last_name, establishment, educational_level, application_status)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-               ON CONFLICT (rut) DO UPDATE SET establishment = EXCLUDED.establishment RETURNING id;`,
-              [gId, student.rut, sfName, spLast, smLast, student.establishment, student.educationalLevel, student.state]
-            );
-            const sId = sRes.rows[0].id;
+          const gRes = await client.query(
+            `INSERT INTO guardians (rut, first_name, paternal_last_name, maternal_last_name, address, sector, email, phone)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT (rut) DO UPDATE SET address = EXCLUDED.address RETURNING id;`,
+            [guardian.rut, fName, pLast, mLast, guardian.address, guardian.sector, guardian.email, guardian.phone]
+          );
+          const gId = gRes.rows[0].id;
 
-            await client.query(
-              `INSERT INTO beneficiary_benefits (guardian_id, student_id, benefit_type_id, status)
-               VALUES ($1, $2, $3, 'PENDING')
-               ON CONFLICT (student_id, benefit_type_id) DO NOTHING;`,
-              [gId, sId, benefitTypeId]
-            );
+          for (const student of memoryStore.students.values()) {
+            if (student.guardianRut === guardian.rut) {
+              const sParts = (student.fullName || "").split(" ");
+              const sfName = sParts[0] || "Alumno";
+              const spLast = sParts[1] || "";
+              const smLast = sParts.slice(2).join(" ") || "";
+
+              const sRes = await client.query(
+                `INSERT INTO students (guardian_id, rut, first_name, paternal_last_name, maternal_last_name, establishment, educational_level, application_status)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                 ON CONFLICT (rut) DO UPDATE SET establishment = EXCLUDED.establishment RETURNING id;`,
+                [gId, student.rut, sfName, spLast, smLast, student.establishment, student.educationalLevel, student.state]
+              );
+              const sId = sRes.rows[0].id;
+
+              await client.query(
+                `INSERT INTO beneficiary_benefits (guardian_id, student_id, benefit_type_id, status)
+                 VALUES ($1, $2, $3, 'PENDING')
+                 ON CONFLICT (student_id, benefit_type_id) DO NOTHING;`,
+                [gId, sId, benefitTypeId]
+              );
+            }
           }
         }
+        console.log("[DB] Población inicial en PostgreSQL completada.");
       }
-      console.log("[DB] Población inicial en PostgreSQL completada.");
     }
 
     client.release();
   } catch (error) {
     usePostgres = false;
     console.log(
-      `[DB INFO] PostgreSQL no está disponible en localhost:5432 (${error.message}). Modo local integrado 100% activo.`
+      `[DB INFO] PostgreSQL no está disponible (${error.message}). Modo local integrado 100% activo.`
     );
   }
 }
@@ -498,7 +829,8 @@ app.get(
 
           if (guardian) {
             const bRes = await pool.query(
-              `SELECT bb.id AS benefit_id, bb.status, bb.delivered_at, bb.evidence_id,
+              `SELECT DISTINCT ON (bb.id)
+                      bb.id AS benefit_id, bb.status, bb.delivered_at, bb.evidence_id,
                       bt.name AS benefit_name,
                       s.rut AS student_rut, s.first_name, s.paternal_last_name, s.maternal_last_name,
                       s.establishment, s.educational_level,
@@ -506,9 +838,9 @@ app.get(
                FROM beneficiary_benefits bb
                JOIN benefit_types bt ON bt.id = bb.benefit_type_id
                JOIN students s ON s.id = bb.student_id
-               LEFT JOIN delivery_evidences de ON (de.id = bb.evidence_id OR de.guardian_id = bb.guardian_id)
+               LEFT JOIN delivery_evidences de ON de.id = bb.evidence_id
                WHERE bb.guardian_id = $1
-               ORDER BY s.paternal_last_name, bt.name`,
+               ORDER BY bb.id, s.paternal_last_name, bt.name`,
               [guardian.id]
             );
 
@@ -652,15 +984,12 @@ app.post(
         return res.status(400).json({ message: "Debes seleccionar al menos un beneficio pendiente." });
       }
 
-      // Guardar archivo físico en uploads/actas
-      const filename = `${Date.now()}_${rutValidation.clean}${extension}`;
-      const destination = path.join(uploadsRoot, filename);
-      fs.writeFileSync(destination, req.file.buffer);
-
+      const fileHash = sha256(req.file.buffer);
       const deliveryDate = new Date().toISOString();
       const deliveredBenefits = [];
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       let dbEvidenceId = null;
+      let filename = null;
 
       // Actualizar en PostgreSQL si está disponible
       if (usePostgres) {
@@ -681,6 +1010,26 @@ app.post(
             guardianId = sRes.rows[0]?.guardian_id;
           }
 
+          // Prevenir entregas duplicadas si los beneficios ya están en DELIVERED
+          const validUuids = benefitIds.filter((id) => uuidRegex.test(id));
+          if (validUuids.length > 0) {
+            const checkAlready = await client.query(
+              `SELECT id, status, evidence_id FROM beneficiary_benefits WHERE id = ANY($1::uuid[]) AND status = 'DELIVERED'`,
+              [validUuids]
+            );
+            if (checkAlready.rowCount === validUuids.length) {
+              await client.query("ROLLBACK");
+              client.release();
+              const existingEvId = checkAlready.rows[0]?.evidence_id;
+              return res.json({
+                message: "Los beneficios seleccionados ya fueron registrados como entregados previamente.",
+                delivery: { id: `del-prev`, deliveredAt: deliveryDate },
+                deliveredBenefits: [],
+                evidence: existingEvId ? { id: existingEvId, logicalFileName: "acta_firmada.jpg", url: `/api/evidences/${existingEvId}/file` } : null,
+              });
+            }
+          }
+
           let deliveredByUserId = null;
           if (req.user?.id && uuidRegex.test(req.user.id)) {
             deliveredByUserId = req.user.id;
@@ -696,12 +1045,27 @@ app.post(
           );
           const deliveryId = delRes.rows[0].id;
 
-          const evRes = await client.query(
-            `INSERT INTO delivery_evidences (delivery_id, guardian_id, logical_file_name, storage_key, mime_type, file_size_bytes, file_hash_sha256, file_data)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-            [deliveryId, guardianId, filename, `acta_${Date.now()}_${filename}`, req.file.mimetype, req.file.size, sha256(req.file.buffer), req.file.buffer]
+          // Deduplicar evidencia: Si ya existe un acta con el mismo hash exacto, reutilizarla
+          const existingEv = await client.query(
+            `SELECT id, logical_file_name FROM delivery_evidences WHERE file_hash_sha256 = $1 LIMIT 1`,
+            [fileHash]
           );
-          dbEvidenceId = evRes.rows[0].id;
+
+          if (existingEv.rowCount > 0) {
+            dbEvidenceId = existingEv.rows[0].id;
+            filename = existingEv.rows[0].logical_file_name;
+          } else {
+            filename = `${Date.now()}_${rutValidation.clean}${extension}`;
+            const destination = path.join(uploadsRoot, filename);
+            fs.writeFileSync(destination, req.file.buffer);
+
+            const evRes = await client.query(
+              `INSERT INTO delivery_evidences (delivery_id, guardian_id, logical_file_name, storage_key, mime_type, file_size_bytes, file_hash_sha256, file_data)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+              [deliveryId, guardianId, filename, `acta_${Date.now()}_${filename}`, req.file.mimetype, req.file.size, fileHash, req.file.buffer]
+            );
+            dbEvidenceId = evRes.rows[0].id;
+          }
 
           for (const bId of benefitIds) {
             if (uuidRegex.test(bId)) {
@@ -715,13 +1079,6 @@ app.post(
                  SET status = 'DELIVERED', delivered_at = CURRENT_TIMESTAMP, evidence_id = $2
                  WHERE id = $1`,
                 [bId, dbEvidenceId]
-              );
-            } else if (guardianId) {
-              await client.query(
-                `UPDATE beneficiary_benefits 
-                 SET status = 'DELIVERED', delivered_at = CURRENT_TIMESTAMP, evidence_id = $2
-                 WHERE guardian_id = $1 AND status != 'DELIVERED'`,
-                [guardianId, dbEvidenceId]
               );
             }
           }
@@ -752,12 +1109,21 @@ app.post(
         }
       }
 
+      // Si no se guardó el archivo físico arriba (ej. modo offline o memoria), guardarlo de forma segura
+      if (!filename) {
+        filename = `${Date.now()}_${rutValidation.clean}${extension}`;
+        const destination = path.join(uploadsRoot, filename);
+        if (!fs.existsSync(destination)) {
+          fs.writeFileSync(destination, req.file.buffer);
+        }
+      }
+
       // Actualizar en memoria (soporte offline o desarrollo local)
       const evidenceId = dbEvidenceId || `ev-${Date.now()}`;
       memoryStore.evidences.set(evidenceId, {
         id: evidenceId,
         filename,
-        path: destination,
+        path: path.join(uploadsRoot, filename),
         mimetype: req.file.mimetype,
         size: req.file.size,
       });
@@ -864,13 +1230,12 @@ app.get(
             // Entregas por día
             const daysRes = await pool.query(`
               SELECT 
-                TO_CHAR(COALESCE(bb.delivered_at, d.delivered_at), 'YYYY-MM-DD') AS fecha,
-                TO_CHAR(COALESCE(bb.delivered_at, d.delivered_at), 'Day') AS dia_nombre,
-                COUNT(*)::int AS total
+                TO_CHAR(bb.delivered_at, 'YYYY-MM-DD') AS fecha,
+                TO_CHAR(bb.delivered_at, 'Day') AS dia_nombre,
+                COUNT(bb.id)::int AS total
               FROM beneficiary_benefits bb
-              LEFT JOIN deliveries d ON d.guardian_id = bb.guardian_id
-              WHERE bb.status = 'DELIVERED' AND (bb.delivered_at IS NOT NULL OR d.delivered_at IS NOT NULL)
-              GROUP BY TO_CHAR(COALESCE(bb.delivered_at, d.delivered_at), 'YYYY-MM-DD'), TO_CHAR(COALESCE(bb.delivered_at, d.delivered_at), 'Day')
+              WHERE bb.status = 'DELIVERED' AND bb.delivered_at IS NOT NULL
+              GROUP BY TO_CHAR(bb.delivered_at, 'YYYY-MM-DD'), TO_CHAR(bb.delivered_at, 'Day')
               ORDER BY fecha ASC
               LIMIT 14
             `);
@@ -967,7 +1332,7 @@ app.get(
       if (usePostgres) {
         try {
           const pgQuery = `
-            SELECT
+            SELECT DISTINCT ON (bb.id)
               bb.id,
               g.rut AS rut_apoderado,
               TRIM(CONCAT(g.first_name, ' ', COALESCE(g.paternal_last_name, ''), ' ', COALESCE(g.maternal_last_name, ''))) AS nombre_apoderado,
@@ -988,8 +1353,8 @@ app.get(
             JOIN guardians g ON g.id = bb.guardian_id
             JOIN students s ON s.id = bb.student_id
             JOIN benefit_types bt ON bt.id = bb.benefit_type_id
-            LEFT JOIN delivery_evidences de ON (de.id = bb.evidence_id OR de.guardian_id = bb.guardian_id)
-            ORDER BY g.paternal_last_name, s.first_name
+            LEFT JOIN delivery_evidences de ON de.id = bb.evidence_id
+            ORDER BY bb.id, g.paternal_last_name, s.first_name
           `;
           const dbRes = await pool.query(pgQuery);
           if (dbRes.rowCount > 0) {
@@ -1132,77 +1497,84 @@ app.post(
         return res.status(400).json({ message: "Debes adjuntar un archivo de planilla Excel." });
       }
 
-      const workbook = xlsx.read(req.file.buffer, { type: "buffer" });
-      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows = xlsx.utils.sheet_to_json(firstSheet, { defval: "" });
+      const { results, errors, totalRows } = parseExcelBeneficiaries(req.file.buffer);
 
-      let importedCount = 0;
-      let rejectedCount = 0;
-      const errors = [];
+      if (results.length === 0) {
+        return res.status(400).json({
+          message: "No se pudieron procesar filas válidas del archivo Excel.",
+          errors,
+        });
+      }
 
-      rows.forEach((row, idx) => {
-        const rawApoderado = row["Rut_Apoderado"] || row["RUT_Apoderado"] || row["rut_apoderado"];
-        const rawAlumno = row["Rut_Alumno"] || row["RUT_Alumno"] || row["rut_alumno"];
+      // Guardar copia del archivo subido en el servidor
+      try {
+        const destFile = path.join(__dirname, "data", "formulario_postulantes.xlsx");
+        fs.writeFileSync(destFile, req.file.buffer);
+      } catch (saveErr) {
+        console.warn("[IMPORT] No se pudo persistir copia local del excel:", saveErr.message);
+      }
 
-        if (!rawApoderado || !rawAlumno) {
-          rejectedCount++;
-          errors.push({ fila: idx + 2, error: "Faltan RUT de apoderado o alumno" });
-          return;
-        }
-
-        const gRut = formatRut(cleanRut(rawApoderado));
-        const sRut = formatRut(cleanRut(rawAlumno));
-
-        let guardian = memoryStore.guardians.get(gRut);
+      // 1. Sincronizar en memoria
+      results.forEach((item) => {
+        let guardian = memoryStore.guardians.get(item.guardian.rut);
         if (!guardian) {
           guardian = {
-            id: `g-imp-${Date.now()}-${idx}`,
-            rut: gRut,
-            fullName: cleanText(row["Nombre_Apoderado"] || "Apoderado"),
-            address: cleanText(row["Direccion"] || "Quilpué"),
-            sector: cleanText(row["Sector"] || "CENTRO"),
-            email: cleanText(row["Correo_Apoderado"] || ""),
-            phone: cleanText(row["Telefono_Apoderado"] || ""),
+            id: `g-xl-${cleanRut(item.guardian.rut)}`,
+            ...item.guardian,
           };
-          memoryStore.guardians.set(gRut, guardian);
+          memoryStore.guardians.set(item.guardian.rut, guardian);
         }
 
-        const studentId = `s-imp-${Date.now()}-${idx}`;
+        const studentId = `s-xl-${cleanRut(item.student.rut)}`;
         const student = {
           id: studentId,
           guardianId: guardian.id,
-          guardianRut: gRut,
-          rut: sRut,
-          fullName: cleanText(row["Nombre_Alumno"] || "Alumno"),
-          establishment: cleanText(row["Establecimiento"] || "Establecimiento"),
-          educationalLevel: cleanText(row["Nivel_Educacional"] || "Básica"),
-          state: cleanText(row["Estado"] || "APROBADA"),
+          ...item.student,
         };
-        memoryStore.students.set(sRut, student);
+        memoryStore.students.set(item.student.rut, student);
 
-        const benefitId = `b-imp-${Date.now()}-${idx}`;
+        const benefitId = `b-xl-${cleanRut(item.student.rut)}`;
         memoryStore.benefits.set(benefitId, {
           id: benefitId,
           guardianId: guardian.id,
-          guardianRut: gRut,
+          guardianRut: item.guardian.rut,
           studentId: studentId,
-          studentRut: sRut,
-          benefitName: cleanText(row["Beneficio"] || "Set Escolar 2026"),
-          status: "PENDING",
-          deliveredAt: null,
+          studentRut: item.student.rut,
+          benefitName: item.benefit.name,
+          status: item.benefit.status,
+          deliveredAt: item.benefit.deliveredAt,
           evidenceId: null,
         });
-
-        importedCount++;
       });
+
+      // 2. Sincronizar en PostgreSQL si está disponible
+      if (usePostgres) {
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          await syncDataToPostgres(client, results);
+          await client.query(
+            `INSERT INTO import_batches (original_file_name, total_rows, imported_rows, rejected_rows)
+             VALUES ($1, $2, $3, $4)`,
+            [req.file.originalname || "formulario.xlsx", totalRows, results.length, errors.length]
+          );
+          await client.query("COMMIT");
+          console.log(`[IMPORT] ¡${results.length} beneficiarios guardados en PostgreSQL exitosamente!`);
+        } catch (dbErr) {
+          await client.query("ROLLBACK");
+          console.error("[IMPORT] Error guardando planilla en PostgreSQL:", dbErr.message);
+        } finally {
+          client.release();
+        }
+      }
 
       return res.json({
         ok: true,
-        message: "Planilla procesada exitosamente.",
+        message: `Planilla procesada exitosamente. ${results.length} beneficiarios cargados.`,
         batchId: `batch-${Date.now()}`,
-        totalRows: rows.length,
-        importedRows: importedCount,
-        rejectedRows: rejectedCount,
+        totalRows,
+        importedRows: results.length,
+        rejectedRows: errors.length,
         errors: errors.slice(0, 10),
       });
     } catch (error) {

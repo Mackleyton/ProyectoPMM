@@ -117,7 +117,7 @@ export default function AdminBeneficiariosPage({ onOpenImportModal }) {
 
                       return (
                         <tr
-                          key={b.rut_alumno || b.id}
+                          key={b.id || `${b.rut_alumno}_${b.beneficio_nombre}`}
                           className="table-row-hover"
                           onClick={() => setSelectedItem(b)}
                         >

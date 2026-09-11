@@ -8,6 +8,7 @@ export default function UploadPage({ onUploadFinished }) {
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
   const inputRef = useRef(null);
+  const isSubmittingRef = useRef(false);
 
   function handleFile(f) {
     if (!f) return;
@@ -21,9 +22,10 @@ export default function UploadPage({ onUploadFinished }) {
   }
 
   async function subir(e) {
-    e.preventDefault();
-    if (!file) return;
+    if (e) e.preventDefault();
+    if (!file || loading || isSubmittingRef.current) return;
 
+    isSubmittingRef.current = true;
     setLoading(true);
     setError('');
     setResult(null);
@@ -32,11 +34,13 @@ export default function UploadPage({ onUploadFinished }) {
       const res = await apiService.subirPlanillaExcel(file);
       setResult(res);
       setFile(null);
+      if (inputRef.current) inputRef.current.value = '';
       if (onUploadFinished) onUploadFinished();
     } catch (err) {
       setError(err.message || 'Error al procesar la planilla');
     } finally {
       setLoading(false);
+      isSubmittingRef.current = false;
     }
   }
 
@@ -55,7 +59,7 @@ export default function UploadPage({ onUploadFinished }) {
 
       <div
         className={`file-drop-area${drag ? ' drag-over' : ''}`}
-        onClick={() => inputRef.current.click()}
+        onClick={() => inputRef.current?.click()}
         onDragOver={(e) => {
           e.preventDefault();
           setDrag(true);
@@ -71,7 +75,9 @@ export default function UploadPage({ onUploadFinished }) {
           ref={inputRef}
           type="file"
           accept=".xlsx,.xls"
+          style={{ display: 'none' }}
           onChange={(e) => handleFile(e.target.files[0])}
+          onClick={(e) => e.stopPropagation()}
         />
         <div className="drop-icon">{file ? '📊' : '📁'}</div>
         <p className="drop-text">
