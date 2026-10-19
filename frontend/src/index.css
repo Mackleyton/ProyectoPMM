@@ -2387,3 +2387,28 @@ body {
     width: 100%;
   }
 }
+
+/* ==========================================================================
+   MODAL DE IMPORTACIÓN (ESTILOS GARANTIZADOS)
+   ========================================================================== */
+.import-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  backdrop-filter: blur(4px);
+}
+.import-modal-card {
+  background: white;
+  width: 100%;
+  max-width: 560px;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}

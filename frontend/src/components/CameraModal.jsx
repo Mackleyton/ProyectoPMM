@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Camera, RefreshCw, Check, X, Upload, AlertCircle, MapPin, Clock } from 'lucide-react';
+import { Camera, RefreshCw, Check, X, Upload } from 'lucide-react';
 import { compressImage, getDeviceLocation } from '../utils/imageUtils';
 
 export default function CameraModal({ isOpen, onClose, onPhotoCaptured }) {
@@ -9,7 +9,6 @@ export default function CameraModal({ isOpen, onClose, onPhotoCaptured }) {
   const [cameraError, setCameraError] = useState('');
   const [isCompressing, setIsCompressing] = useState(false);
   const [location, setLocation] = useState(null);
-  const [captureTime, setCaptureTime] = useState(null);
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -18,7 +17,6 @@ export default function CameraModal({ isOpen, onClose, onPhotoCaptured }) {
   useEffect(() => {
     if (isOpen) {
       startCamera();
-      // Iniciar captura de coordenadas GPS en paralelo
       getDeviceLocation().then((loc) => setLocation(loc));
     } else {
       stopCamera();
@@ -26,7 +24,6 @@ export default function CameraModal({ isOpen, onClose, onPhotoCaptured }) {
       setPhotoBlob(null);
       setCameraError('');
       setLocation(null);
-      setCaptureTime(null);
     }
     return () => {
       stopCamera();
@@ -46,7 +43,7 @@ export default function CameraModal({ isOpen, onClose, onPhotoCaptured }) {
       }
     } catch (err) {
       console.warn('Cámara no accesible:', err.message);
-      setCameraError('No se pudo acceder a la cámara directamente. Puedes usar el botón para seleccionar o tomar una foto desde tu galería.');
+      setCameraError('No se pudo acceder a la cámara directamente. Puedes usar el botón para subir una fotografía desde tus archivos.');
     }
   }
 
@@ -60,17 +57,12 @@ export default function CameraModal({ isOpen, onClose, onPhotoCaptured }) {
   async function processCapturedBlob(rawBlob) {
     setIsCompressing(true);
     try {
-      const now = new Date();
-      setCaptureTime(now.toLocaleTimeString('es-CL'));
-
-      // Compresión en cliente
-      const compressedBlob = await compressImage(rawBlob, { maxWidth: 1280, maxHeight: 1280, quality: 0.78 });
-      const dataUrl = URL.createObjectURL(compressedBlob);
-
-      setPhotoBlob(compressedBlob);
+      const compressed = await compressImage(rawBlob, { maxWidth: 1280, maxHeight: 1280, quality: 0.78 });
+      const dataUrl = URL.createObjectURL(compressed);
+      setPhotoBlob(compressed);
       setPhotoDataUrl(dataUrl);
     } catch (err) {
-      console.error('Error al comprimir fotografía:', err);
+      console.error('Error al procesar foto:', err);
     } finally {
       setIsCompressing(false);
     }
@@ -119,59 +111,74 @@ export default function CameraModal({ isOpen, onClose, onPhotoCaptured }) {
   function retakePhoto() {
     setPhotoDataUrl(null);
     setPhotoBlob(null);
-    setCaptureTime(null);
     startCamera();
   }
 
   if (!isOpen) return null;
 
   return (
-    <div className="modal-backdrop">
-      <div className="modal-content camera-modal">
-        <div className="modal-header">
-          <div className="modal-title-with-icon">
-            <Camera size={20} />
-            <h3>Captura de Acta Física Firmada</h3>
+    <div className="camera-modal-backdrop">
+      <div className="camera-modal-container">
+        <div className="camera-modal-header">
+          <div className="camera-modal-title">
+            <div className="camera-icon-badge">📷</div>
+            <div>
+              <h3>Captura de Acta Firmada</h3>
+              <p>Encuadra el documento dentro de la guía y presiona capturar</p>
+            </div>
           </div>
           <button className="modal-close-btn" onClick={onClose} aria-label="Cerrar modal">
-            <X size={20} />
+            ✕
           </button>
         </div>
 
-        <div className="camera-view-container">
+        <div className="camera-modal-body">
           {!photoDataUrl ? (
-            <>
+            <div className="live-camera-wrap">
               {cameraError ? (
-                <div className="camera-error-box">
-                  <AlertCircle size={36} className="error-icon" />
-                  <p>{cameraError}</p>
+                <div className="camera-loading-overlay">
+                  <p style={{ textAlign: 'center', padding: '0 16px' }}>{cameraError}</p>
                   <button
                     type="button"
-                    className="btn btn-primary"
+                    className="btn btn-yellow"
                     onClick={() => fileInputRef.current?.click()}
                   >
-                    <Upload size={16} />
-                    <span>Seleccionar foto del dispositivo</span>
+                    <Upload size={16} /> Subir desde archivo
                   </button>
                 </div>
               ) : (
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="camera-video-stream"
-                  onLoadedMetadata={() => videoRef.current?.play()}
-                />
+                <>
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="live-camera-video"
+                    onLoadedMetadata={() => videoRef.current?.play()}
+                  />
+                  <div className="acta-guide-overlay">
+                    <div className="acta-guide-box">
+                      <span className="guide-corner tl" />
+                      <span className="guide-corner tr" />
+                      <span className="guide-corner bl" />
+                      <span className="guide-corner br" />
+                      <span className="guide-text">Encuadra el acta física aquí</span>
+                    </div>
+                  </div>
+                </>
               )}
-            </>
+            </div>
           ) : (
-            <div className="photo-preview-wrapper">
-              <img src={photoDataUrl} alt="Vista previa del acta" className="captured-photo-img" />
+            <div className="live-camera-wrap">
+              <img
+                src={photoDataUrl}
+                alt="Vista previa del acta"
+                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+              />
               {isCompressing && (
-                <div className="compression-overlay">
-                  <RefreshCw size={24} className="spin-anim" />
-                  <span>Optimizando fotografía…</span>
+                <div className="camera-loading-overlay">
+                  <div className="camera-spinner" />
+                  <span>Optimizando acta…</span>
                 </div>
               )}
             </div>
@@ -187,54 +194,44 @@ export default function CameraModal({ isOpen, onClose, onPhotoCaptured }) {
           />
         </div>
 
-        {/* Metadatos en vivo */}
-        <div className="camera-meta-info-row">
-          <div className="meta-pill">
-            <Clock size={14} />
-            <span>{captureTime ? `Hora: ${captureTime}` : 'Hora actual'}</span>
-          </div>
-          <div className="meta-pill">
-            <MapPin size={14} />
-            <span>
-              {location?.latitude
-                ? `GPS: ${location.latitude.toFixed(4)}, ${location.longitude.toFixed(4)}`
-                : 'GPS: Adquiriendo señal…'}
-            </span>
-          </div>
-        </div>
-
-        <div className="modal-footer camera-footer">
+        <div className="camera-modal-footer" style={{ padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
           {!photoDataUrl ? (
             <>
               <button
                 type="button"
-                className="btn btn-outline"
+                className="btn btn-outline btn-sm"
                 onClick={() => fileInputRef.current?.click()}
               >
-                <Upload size={16} />
-                <span>Subir archivo</span>
+                <Upload size={15} /> Subir archivo
               </button>
               {!cameraError && (
-                <button type="button" className="btn btn-primary btn-capture" onClick={takeSnapshot}>
-                  <Camera size={18} />
-                  <span>Capturar Acta</span>
+                <button
+                  type="button"
+                  className="btn btn-yellow btn-shutter"
+                  onClick={takeSnapshot}
+                >
+                  <span className="shutter-circle" />
+                  <span>Tomar Fotografía</span>
                 </button>
               )}
             </>
           ) : (
             <>
-              <button type="button" className="btn btn-outline" onClick={retakePhoto} disabled={isCompressing}>
-                <RefreshCw size={16} />
-                <span>Volver a tomar</span>
+              <button
+                type="button"
+                className="btn btn-outline btn-sm"
+                onClick={retakePhoto}
+                disabled={isCompressing}
+              >
+                <RefreshCw size={15} /> Volver a tomar
               </button>
               <button
                 type="button"
-                className="btn btn-success"
+                className="btn btn-primary"
                 onClick={handleConfirm}
                 disabled={isCompressing || !photoBlob}
               >
-                <Check size={18} />
-                <span>Confirmar Fotografía</span>
+                <Check size={16} /> Confirmar Fotografía
               </button>
             </>
           )}

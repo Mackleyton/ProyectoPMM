@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { Shield, User, Lock, LogIn, AlertCircle, Sparkles } from 'lucide-react';
 import { apiService } from '../services/apiService';
 
 export default function LoginPage({ onLogin }) {
@@ -9,11 +8,11 @@ export default function LoginPage({ onLogin }) {
   const [error, setError] = useState('');
 
   async function handleSubmit(e) {
-    e.preventDefault();
+    if (e) e.preventDefault();
     setError('');
 
     if (!username.trim() || !password) {
-      setError('Por favor ingresa usuario y contraseña.');
+      setError('Por favor ingresa tu usuario y contraseña.');
       return;
     }
 
@@ -28,7 +27,7 @@ export default function LoginPage({ onLogin }) {
     }
   }
 
-  function handleQuickFill(userType) {
+  function handleQuick(userType) {
     if (userType === 'admin') {
       setUsername('admin');
       setPassword('Admin123!');
@@ -40,30 +39,49 @@ export default function LoginPage({ onLogin }) {
   }
 
   return (
-    <div className="login-page-container">
-      <div className="login-card">
-        <div className="login-header">
-          <div className="login-shield-badge">
-            <Shield size={36} />
+    <div className="login-wrapper">
+      {/* Lado izquierdo institucional */}
+      <div className="login-side-illustration">
+        <div className="illustration-container">
+          <img
+            src={`${import.meta.env.BASE_URL}assets/quilpue-iglesia.png`}
+            alt="Quilpué"
+            className="illustration-img"
+            onError={(e) => {
+              e.currentTarget.style.display = 'none';
+            }}
+          />
+          <div className="illustration-text">
+            <h2>Plataforma de Beneficios Sociales</h2>
+            <p>Ilustre Municipalidad de Quilpué — Dirección de Desarrollo Comunitario (DIDECO)</p>
           </div>
-          <h1 className="login-title">Plataforma de Beneficios</h1>
-          <p className="login-subtitle">Dirección de Desarrollo Comunitario (DIDECO) — Quilpué</p>
         </div>
+      </div>
 
-        {error && (
-          <div className="login-error-alert">
-            <AlertCircle size={18} />
-            <span>{error}</span>
+      {/* Lado derecho: Formulario de Login */}
+      <div className="login-form-side">
+        <div className="login-card-content">
+          <div className="login-brand-header">
+            <img
+              src={`${import.meta.env.BASE_URL}assets/logo-white-horiz.png`}
+              alt="Municipalidad de Quilpué"
+              className="login-brand-logo"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+              }}
+            />
+            <span className="brand-title">QUILPUÉ</span>
+            <span className="brand-subtitle">MUNICIPALIDAD</span>
+            <span className="brand-dept-tag">DIDECO · BENEFICIOS SOCIALES</span>
           </div>
-        )}
 
-        <form onSubmit={handleSubmit} className="login-form">
-          <div className="form-group">
-            <label htmlFor="username">Usuario o Correo Institucional</label>
-            <div className="input-with-icon">
-              <User size={18} className="input-icon" />
+          {error && <div className="terreno-msg-error">{error}</div>}
+
+          <form onSubmit={handleSubmit} className="login-form">
+            <div className="login-input-group">
+              <label htmlFor="login-username">Usuario o correo</label>
               <input
-                id="username"
+                id="login-username"
                 type="text"
                 autoComplete="username"
                 placeholder="Ej. admin o terreno"
@@ -72,14 +90,11 @@ export default function LoginPage({ onLogin }) {
                 disabled={loading}
               />
             </div>
-          </div>
 
-          <div className="form-group">
-            <label htmlFor="password">Contraseña</label>
-            <div className="input-with-icon">
-              <Lock size={18} className="input-icon" />
+            <div className="login-input-group">
+              <label htmlFor="login-password">Contraseña</label>
               <input
-                id="password"
+                id="login-password"
                 type="password"
                 autoComplete="current-password"
                 placeholder="••••••••"
@@ -88,33 +103,36 @@ export default function LoginPage({ onLogin }) {
                 disabled={loading}
               />
             </div>
-          </div>
 
-          <button type="submit" className="btn btn-primary btn-block btn-lg" disabled={loading}>
-            <LogIn size={18} />
-            <span>{loading ? 'Iniciando sesión…' : 'Ingresar al Sistema'}</span>
-          </button>
-        </form>
-
-        <div className="login-demo-helper">
-          <span className="helper-label">Acceso rápido para pruebas:</span>
-          <div className="quick-access-buttons">
             <button
-              type="button"
-              className="quick-btn admin"
-              onClick={() => handleQuickFill('admin')}
+              type="submit"
+              className="btn btn-yellow login-submit-btn"
               disabled={loading}
             >
-              Administrador
+              {loading ? 'Iniciando sesión…' : 'Ingresar al Sistema'}
             </button>
-            <button
-              type="button"
-              className="quick-btn terreno"
-              onClick={() => handleQuickFill('terreno')}
-              disabled={loading}
-            >
-              Operador Terreno
-            </button>
+          </form>
+
+          <div className="quick-access-section">
+            <span className="quick-access-title">Acceso rápido para funcionarios</span>
+            <div className="quick-btn-grid">
+              <button
+                type="button"
+                className="quick-role-btn"
+                onClick={() => handleQuick('admin')}
+                disabled={loading}
+              >
+                <strong>Administrador</strong> — Dashboard, Beneficiarios, Nóminas
+              </button>
+              <button
+                type="button"
+                className="quick-role-btn"
+                onClick={() => handleQuick('terreno')}
+                disabled={loading}
+              >
+                <strong>Operador Terreno</strong> — Búsqueda por RUT y Entregas
+              </button>
+            </div>
           </div>
         </div>
       </div>

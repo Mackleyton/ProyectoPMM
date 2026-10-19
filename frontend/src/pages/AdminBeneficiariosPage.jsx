@@ -1,34 +1,19 @@
 import { useState, useEffect, useRef } from 'react';
-import {
-  Users,
-  Search,
-  Upload,
-  RefreshCw,
-  Trash2,
-  PlusCircle,
-  CheckCircle2,
-  Clock,
-  XCircle,
-  FileSpreadsheet,
-  AlertTriangle,
-  X,
-  FileCheck,
-  Eye,
-  MapPin,
-  Calendar,
-} from 'lucide-react';
 import { apiService } from '../services/apiService';
+import { formatRut, cleanRut } from '../utils/rutUtils';
 
 export default function AdminBeneficiariosPage() {
   const [beneficiarios, setBeneficiarios] = useState([]);
   const [search, setSearch] = useState('');
   const [filtroEstado, setFiltroEstado] = useState('TODOS');
   const [loading, setLoading] = useState(true);
+
+  // Beneficiario seleccionado para ver el detalle
   const [selectedItem, setSelectedItem] = useState(null);
 
-  // Modal de importación con los dos modos solicitados
+  // Estado del modal de importación con los dos modos solicitados
   const [importModalOpen, setImportModalOpen] = useState(false);
-  const [importMode, setImportMode] = useState('update'); // 'update' | 'replace'
+  const [importMode, setImportMode] = useState('update'); // 'replace' | 'update'
   const [selectedFile, setSelectedFile] = useState(null);
   const [importLoading, setImportLoading] = useState(false);
   const [importResult, setImportResult] = useState(null);
@@ -56,11 +41,11 @@ export default function AdminBeneficiariosPage() {
   }, [filtroEstado]);
 
   function handleSearchSubmit(e) {
-    e.preventDefault();
+    if (e) e.preventDefault();
     cargar();
   }
 
-  function openImportModal(mode) {
+  function handleOpenModal(mode) {
     setImportMode(mode);
     setSelectedFile(null);
     setImportResult(null);
@@ -68,7 +53,7 @@ export default function AdminBeneficiariosPage() {
     setImportModalOpen(true);
   }
 
-  function handleFileSelected(e) {
+  function handleFileChange(e) {
     const file = e.target.files[0];
     if (file) {
       if (!/\.xlsx?$/i.test(file.name)) {
@@ -104,68 +89,64 @@ export default function AdminBeneficiariosPage() {
     <div className="admin-beneficiarios-container">
       {!selectedItem ? (
         <>
-          {/* BARRA SUPERIOR CON LOS DOS BOTONES REQUERIDOS */}
+          {/* BARRA SUPERIOR: BOTONES DE IMPORTACIÓN Y BUSCADOR */}
           <div className="beneficiarios-top-bar">
             <div className="top-bar-left">
-              <div className="section-title-with-icon">
-                <Users size={24} />
-                <h2 className="section-title-large">Padrón de Beneficiarios</h2>
-              </div>
-              <div className="import-action-buttons">
-                {/* Botón 1: Reemplazo total */}
-                <button
-                  type="button"
-                  className="btn btn-danger-outline btn-sm"
-                  onClick={() => openImportModal('replace')}
-                  title="Elimina el contenido actual y monta una planilla nueva desde cero"
-                >
-                  <Trash2 size={16} />
-                  <span>Eliminar y Subir Nueva Nómina</span>
-                </button>
+              <h2 className="section-title-large">Beneficiarios</h2>
+              
+              {/* Botón 1: Eliminar y Subir Nueva Nómina */}
+              <button
+                type="button"
+                className="btn btn-outline btn-sm"
+                style={{ borderColor: '#ef4444', color: '#dc2626' }}
+                onClick={() => handleOpenModal('replace')}
+                title="Elimina el contenido actual y monta una planilla nueva"
+              >
+                Eliminar y Subir Nueva Plantilla
+              </button>
 
-                {/* Botón 2: Actualización incremental */}
-                <button
-                  type="button"
-                  className="btn btn-yellow btn-sm"
-                  onClick={() => openImportModal('update')}
-                  title="Agrega nuevos registros o actualiza los existentes conservando entregas"
-                >
-                  <PlusCircle size={16} />
-                  <span>Actualizar / Sumar Nómina</span>
-                </button>
-              </div>
+              {/* Botón 2: Actualizar / Sumar Nómina */}
+              <button
+                type="button"
+                className="btn btn-yellow btn-importar btn-sm"
+                onClick={() => handleOpenModal('update')}
+                title="Agrega nuevos registros o actualiza los existentes conservando entregas"
+              >
+                + Actualizar / Sumar Plantilla
+              </button>
             </div>
 
             <form className="top-bar-right" onSubmit={handleSearchSubmit}>
               <div className="search-box-pill">
                 <input
                   type="text"
-                  placeholder="Buscar por RUT o Nombre…"
+                  placeholder="Ejemplo: 12.345.678-9"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
                 <button type="submit" className="pill-search-btn" title="Buscar">
-                  <Search size={16} />
+                  🔍
                 </button>
               </div>
             </form>
           </div>
 
-          {/* FILTROS POR ESTADO */}
+          {/* FILTROS RÁPIDOS */}
           <div className="status-filter-pills">
-            {[
-              { id: 'TODOS', label: 'Todos los Registros' },
-              { id: 'PENDIENTE', label: 'Pendientes' },
-              { id: 'ENTREGADO', label: 'Entregados' },
-              { id: 'RECHAZADA', label: 'Rechazadas' },
-            ].map((f) => (
+            {['TODOS', 'PENDIENTE', 'ENTREGADO', 'RECHAZADA'].map((st) => (
               <button
-                key={f.id}
+                key={st}
                 type="button"
-                className={`filter-pill-btn ${filtroEstado === f.id ? 'active' : ''}`}
-                onClick={() => setFiltroEstado(f.id)}
+                className={`filter-pill-btn ${filtroEstado === st ? 'active' : ''}`}
+                onClick={() => setFiltroEstado(st)}
               >
-                <span>{f.label}</span>
+                {st === 'TODOS'
+                  ? 'Todos los Registros'
+                  : st === 'PENDIENTE'
+                  ? 'Pendientes'
+                  : st === 'ENTREGADO'
+                  ? 'Entregados'
+                  : 'Rechazadas'}
               </button>
             ))}
             <span className="results-count-chip">
@@ -173,30 +154,25 @@ export default function AdminBeneficiariosPage() {
             </span>
           </div>
 
-          {/* TABLA PRINCIPAL */}
+          {/* TABLA PRINCIPAL DE BENEFICIARIOS */}
           <div className="admin-table-card">
             {loading ? (
-              <div className="table-loading-state">
-                <RefreshCw size={24} className="spin-anim" />
-                <span>Cargando padrón de beneficiarios…</span>
+              <div style={{ padding: '36px', textAlign: 'center', color: '#64748b' }}>
+                Cargando nómina de beneficiarios…
               </div>
             ) : beneficiarios.length === 0 ? (
-              <div className="table-empty-state">
-                <FileSpreadsheet size={36} className="empty-icon" />
-                <p>No se encontraron beneficiarios con los criterios seleccionados.</p>
+              <div style={{ padding: '48px', textAlign: 'center', color: '#64748b' }}>
+                <p>No se encontraron beneficiarios con los criterios especificados.</p>
               </div>
             ) : (
-              <div className="table-responsive">
+              <div style={{ overflowX: 'auto' }}>
                 <table className="admin-table">
                   <thead>
                     <tr>
-                      <th>Alumno / Apoderado</th>
+                      <th>Nombre</th>
                       <th>RUT</th>
                       <th>Contacto</th>
-                      <th>Establecimiento</th>
-                      <th>Beneficio</th>
                       <th style={{ textAlign: 'center' }}>Estado</th>
-                      <th style={{ textAlign: 'center' }}>Acta</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -226,46 +202,22 @@ export default function AdminBeneficiariosPage() {
                             <div>{b.telefono_apoderado || 'Sin teléfono'}</div>
                             <small className="cell-secondary-text">{b.correo_apoderado || '—'}</small>
                           </td>
-                          <td>
-                            <div className="cell-school">{b.establecimiento || 'Quilpué'}</div>
-                            <small className="cell-secondary-text">{b.sector}</small>
-                          </td>
-                          <td>
-                            <span className="cell-benefit-badge">{b.beneficio_nombre}</span>
-                          </td>
                           <td style={{ textAlign: 'center' }}>
                             {isEntregado ? (
-                              <span className="status-badge-clean green">
-                                <CheckCircle2 size={14} />
-                                <span>Entregado</span>
+                              <span className="status-badge-circle green" title="Entregado">
+                                ✓
                               </span>
                             ) : isAprobada ? (
-                              <span className="status-badge-clean yellow">
-                                <Clock size={14} />
-                                <span>Pendiente</span>
-                              </span>
-                            ) : (
-                              <span className="status-badge-clean gray">
-                                <XCircle size={14} />
-                                <span>{b.estado || 'Rechazada'}</span>
-                              </span>
-                            )}
-                          </td>
-                          <td style={{ textAlign: 'center' }}>
-                            {b.foto_acta ? (
-                              <button
-                                type="button"
-                                className="btn-table-icon"
-                                title="Ver fotografía del acta física"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedItem(b);
-                                }}
+                              <span
+                                className="status-badge-circle yellow"
+                                title="Aprobada - Pendiente"
                               >
-                                <Eye size={16} />
-                              </button>
+                                −
+                              </span>
                             ) : (
-                              <span className="text-muted">—</span>
+                              <span className="status-badge-circle red" title={b.estado || 'Rechazada'}>
+                                ✕
+                              </span>
                             )}
                           </td>
                         </tr>
@@ -278,210 +230,287 @@ export default function AdminBeneficiariosPage() {
           </div>
         </>
       ) : (
-        /* VISTA DE DETALLE DEL BENEFICIARIO SELECCIONADO */
-        <div className="beneficiary-detail-view">
-          <div className="detail-top-nav">
-            <button
-              type="button"
-              className="btn btn-outline btn-sm"
-              onClick={() => setSelectedItem(null)}
-            >
-              ← Volver al listado
-            </button>
-            <h3 className="detail-title">Detalle de Beneficiario y Trazabilidad</h3>
-          </div>
+        /* VISTA DE DETALLE ADMINISTRATIVO CON ACTA FÍSICA */
+        <div className="admin-detail-container">
+          <button
+            type="button"
+            className="btn-back-link"
+            onClick={() => setSelectedItem(null)}
+          >
+            ← Volver a la lista de beneficiarios
+          </button>
 
-          <div className="detail-content-grid">
-            <div className="detail-card info-card">
-              <h4>Información del Estudiante</h4>
-              <div className="detail-row">
-                <span className="d-label">Nombre Completo:</span>
-                <span className="d-val">{selectedItem.nombre_alumno}</span>
-              </div>
-              <div className="detail-row">
-                <span className="d-label">RUT Estudiante:</span>
-                <span className="d-val">{selectedItem.rut_alumno}</span>
-              </div>
-              <div className="detail-row">
-                <span className="d-label">Establecimiento:</span>
-                <span className="d-val">{selectedItem.establecimiento}</span>
-              </div>
-              <div className="detail-row">
-                <span className="d-label">Nivel Educacional:</span>
-                <span className="d-val">{selectedItem.nivel_educacional}</span>
-              </div>
-              <div className="detail-row">
-                <span className="d-label">Beneficio Asignado:</span>
-                <span className="d-val highlight">{selectedItem.beneficio_nombre}</span>
-              </div>
+          <div className="admin-detail-card">
+            <div className="detail-split-layout">
+              {/* Columna Izquierda: Datos del Beneficiario */}
+              <div className="detail-info-column">
+                <h3 className="detail-section-title">Datos del Beneficiario</h3>
 
-              <h4 style={{ marginTop: '20px' }}>Información del Apoderado</h4>
-              <div className="detail-row">
-                <span className="d-label">Apoderado:</span>
-                <span className="d-val">{selectedItem.nombre_apoderado}</span>
-              </div>
-              <div className="detail-row">
-                <span className="d-label">RUT Apoderado:</span>
-                <span className="d-val">{selectedItem.rut_apoderado}</span>
-              </div>
-              <div className="detail-row">
-                <span className="d-label">Dirección:</span>
-                <span className="d-val">{selectedItem.direccion}</span>
-              </div>
-              <div className="detail-row">
-                <span className="d-label">Sector:</span>
-                <span className="d-val">{selectedItem.sector}</span>
-              </div>
-              <div className="detail-row">
-                <span className="d-label">Contacto:</span>
-                <span className="d-val">{selectedItem.telefono_apoderado || '—'} · {selectedItem.correo_apoderado || '—'}</span>
-              </div>
-            </div>
-
-            <div className="detail-card acta-card">
-              <h4>Respaldo de Entrega (Acta Física Firmada)</h4>
-              {selectedItem.foto_acta ? (
-                <div className="acta-full-preview">
-                  <img src={selectedItem.foto_acta} alt="Acta de entrega firmada" className="acta-image" />
-                  <div className="acta-meta-bar">
-                    <span className="meta-text">
-                      <Calendar size={14} /> Fecha entrega: {selectedItem.fecha_entrega || 'Registrada'}
+                <div className="detail-info-grid">
+                  <div className="detail-info-item">
+                    <label>Nombre del Alumno</label>
+                    <span>{selectedItem.nombre_alumno}</span>
+                  </div>
+                  <div className="detail-info-item">
+                    <label>RUT Alumno</label>
+                    <span style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>
+                      {selectedItem.rut_alumno}
                     </span>
-                    <a
-                      href={selectedItem.foto_acta}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="btn btn-sm btn-outline"
-                    >
-                      Abrir en tamaño original
-                    </a>
+                  </div>
+                  <div className="detail-info-item">
+                    <label>Establecimiento</label>
+                    <span>{selectedItem.establecimiento}</span>
+                  </div>
+                  <div className="detail-info-item">
+                    <label>Nivel Educacional</label>
+                    <span>{selectedItem.nivel_educacional}</span>
+                  </div>
+                  <div className="detail-info-item" style={{ gridColumn: 'span 2' }}>
+                    <label>Beneficio Social Asignado</label>
+                    <span style={{ color: 'var(--color-primary)', fontWeight: 'bold' }}>
+                      {selectedItem.beneficio_nombre}
+                    </span>
                   </div>
                 </div>
-              ) : (
-                <div className="acta-missing-box">
-                  <Clock size={32} />
-                  <p>Beneficio en estado pendiente. Aún no se ha registrado la entrega física ni el acta en terreno.</p>
+
+                <div className="detail-divider" />
+
+                <h3 className="detail-section-title">Datos del Apoderado</h3>
+                <div className="detail-info-grid">
+                  <div className="detail-info-item">
+                    <label>Nombre Completo</label>
+                    <span>{selectedItem.nombre_apoderado}</span>
+                  </div>
+                  <div className="detail-info-item">
+                    <label>RUT Apoderado</label>
+                    <span style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>
+                      {selectedItem.rut_apoderado}
+                    </span>
+                  </div>
+                  <div className="detail-info-item">
+                    <label>Dirección</label>
+                    <span>{selectedItem.direccion}</span>
+                  </div>
+                  <div className="detail-info-item">
+                    <label>Sector Comunal</label>
+                    <span>{selectedItem.sector}</span>
+                  </div>
+                  <div className="detail-info-item">
+                    <label>Teléfono</label>
+                    <span>{selectedItem.telefono_apoderado || 'No registrado'}</span>
+                  </div>
+                  <div className="detail-info-item">
+                    <label>Correo</label>
+                    <span>{selectedItem.correo_apoderado || 'No registrado'}</span>
+                  </div>
                 </div>
-              )}
+              </div>
+
+              {/* Columna Derecha: Estado y Fotografía del Acta */}
+              <div className="detail-status-column">
+                {selectedItem.entregado ? (
+                  <div className="acta-delivered-box">
+                    <div className="acta-document-preview">
+                      {selectedItem.foto_acta ? (
+                        <img
+                          src={selectedItem.foto_acta}
+                          alt="Acta de entrega firmada"
+                          className="acta-real-photo"
+                        />
+                      ) : (
+                        <div className="acta-paper-mockup">
+                          <span className="paper-seal">🏛️</span>
+                          <div className="paper-header-line" />
+                          <div className="paper-text-line" />
+                          <div className="paper-text-line short" />
+                          <div className="paper-signature">
+                            <span className="signature-mark">Firmado</span>
+                            <small>Acta Física Archivada</small>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="status-badge-delivered-wrap">
+                      <div className="delivered-circle-icon">✓</div>
+                      <span className="delivered-text-label">Entregado</span>
+                      <span className="delivered-date-text">
+                        {selectedItem.fecha_entrega
+                          ? `Fecha: ${selectedItem.fecha_entrega}`
+                          : 'Entrega registrada en terreno'}
+                      </span>
+                      {selectedItem.foto_acta && (
+                        <a
+                          href={selectedItem.foto_acta}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="btn btn-outline btn-sm"
+                          style={{ marginTop: '10px' }}
+                        >
+                          Ver Fotografía Original
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="acta-pending-box">
+                    <div className="pending-circle-icon">−</div>
+                    <span className="pending-text-label">Pendiente</span>
+                    <p className="pending-hint-text">
+                      La entrega física aún no ha sido registrada por un operador en terreno.
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* MODAL DE IMPORTACIÓN CON LOS DOS MODOS */}
+      {/* MODAL DE IMPORTACIÓN CON AMBOS MODOS FUNCIONALES */}
       {importModalOpen && (
-        <div className="modal-backdrop">
-          <div className="modal-content import-modal">
-            <div className="modal-header">
-              <div className="modal-title-with-icon">
-                <FileSpreadsheet size={22} />
-                <h3>
-                  {importMode === 'replace'
-                    ? 'Reemplazar Nómina Completa'
-                    : 'Actualizar o Sumar a la Nómina Existente'}
-                </h3>
+        <div className="import-modal-backdrop">
+          <div className="import-modal-card">
+            <div className="camera-modal-header">
+              <div className="camera-modal-title">
+                <div className="camera-icon-badge">📊</div>
+                <div>
+                  <h3>
+                    {importMode === 'replace'
+                      ? 'Eliminar Contenido Actual y Cargar Nueva Plantilla'
+                      : 'Actualizar / Sumar Información a la Nómina Existente'}
+                  </h3>
+                  <p>
+                    {importMode === 'replace'
+                      ? 'Esta acción reiniciará los registros actuales y montará la nueva nómina.'
+                      : 'Se agregarán nuevos postulantes y se actualizarán datos conservando las entregas ya registradas.'}
+                  </p>
+                </div>
               </div>
               <button
+                type="button"
                 className="modal-close-btn"
                 onClick={() => setImportModalOpen(false)}
                 disabled={importLoading}
               >
-                <X size={20} />
+                ✕
               </button>
             </div>
 
-            <div className="modal-body">
+            <div style={{ padding: '24px' }}>
               {importMode === 'replace' ? (
-                <div className="import-alert-box danger">
-                  <AlertTriangle size={24} className="alert-icon" />
-                  <div>
-                    <strong>Advertencia de Reemplazo Total:</strong>
-                    <p>
-                      Esta acción eliminará el padrón y las actas actuales, cargando únicamente la información
-                      contenida en la nueva planilla Excel.
-                    </p>
-                  </div>
+                <div
+                  style={{
+                    backgroundColor: '#fef2f2',
+                    borderLeft: '4px solid #ef4444',
+                    padding: '12px 16px',
+                    borderRadius: '6px',
+                    marginBottom: '16px',
+                    color: '#991b1b',
+                    fontSize: '0.88rem',
+                  }}
+                >
+                  <strong>⚠️ Atención:</strong> Al confirmar el reemplazo, se eliminarán los beneficiarios actuales y se cargarán únicamente los que estén presentes en la nueva planilla Excel.
                 </div>
               ) : (
-                <div className="import-alert-box info">
-                  <PlusCircle size={24} className="alert-icon" />
-                  <div>
-                    <strong>Modo Actualización / Fusión:</strong>
-                    <p>
-                      Se agregarán nuevos postulantes y se actualizarán los datos de los existentes.
-                      Las actas físicas y entregas ya registradas se conservarán intactas.
-                    </p>
-                  </div>
+                <div
+                  style={{
+                    backgroundColor: '#eff6ff',
+                    borderLeft: '4px solid #3b82f6',
+                    padding: '12px 16px',
+                    borderRadius: '6px',
+                    marginBottom: '16px',
+                    color: '#1e40af',
+                    fontSize: '0.88rem',
+                  }}
+                >
+                  <strong>ℹ️ Modo Seguro:</strong> Se incorporarán nuevos registros y se actualizarán los existentes. Las entregas y actas ya realizadas permanecerán intactas.
                 </div>
               )}
 
+              {/* Área de Selección de Archivo */}
               <div
-                className="file-dropzone"
+                className="file-drop-area"
                 onClick={() => fileInputRef.current?.click()}
+                style={{ cursor: 'pointer', textAlign: 'center', margin: '0 auto' }}
               >
                 <input
                   ref={fileInputRef}
                   type="file"
                   accept=".xlsx,.xls"
                   style={{ display: 'none' }}
-                  onChange={handleFileSelected}
+                  onChange={handleFileChange}
                 />
-                <Upload size={32} className="dropzone-icon" />
-                <p className="dropzone-text">
+                <div className="drop-icon">📁</div>
+                <p className="drop-text">
                   {selectedFile
-                    ? `Archivo seleccionado: ${selectedFile.name}`
-                    : 'Haz clic o arrastra aquí tu planilla Excel (.xlsx, .xls)'}
+                    ? `Archivo listo: ${selectedFile.name}`
+                    : 'Haz clic aquí para seleccionar tu archivo Excel (.xlsx o .xls)'}
                 </p>
-                <small className="dropzone-sub">
-                  Soporta planillas como <code>Listado Ayuda Escolar.xlsx</code> y formatos comunales oficiales.
-                </small>
+                {selectedFile && (
+                  <p className="drop-file-name" style={{ color: '#16a34a', fontWeight: 'bold' }}>
+                    ✓ Tamaño: {(selectedFile.size / 1024).toFixed(1)} KB
+                  </p>
+                )}
               </div>
 
               {importError && (
-                <div className="modal-error-alert">
-                  <XCircle size={16} />
-                  <span>{importError}</span>
+                <div className="terreno-msg-error" style={{ marginTop: '14px' }}>
+                  {importError}
                 </div>
               )}
 
               {importResult && (
-                <div className="modal-success-alert">
-                  <CheckCircle2 size={16} />
-                  <span>
-                    {importResult.message || 'Planilla procesada con éxito'} ({importResult.importedRows || 0} registros).
-                  </span>
+                <div
+                  style={{
+                    backgroundColor: '#ecfdf5',
+                    color: '#065f46',
+                    padding: '12px 16px',
+                    borderRadius: '8px',
+                    marginTop: '14px',
+                    fontSize: '0.88rem',
+                    fontWeight: '600',
+                  }}
+                >
+                  ✓ {importResult.message} ({importResult.importedRows || 0} beneficiarios procesados).
                 </div>
               )}
             </div>
 
-            <div className="modal-footer">
+            <div
+              style={{
+                padding: '16px 24px',
+                background: '#f8fafc',
+                borderTop: '1px solid #e2e8f0',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: '10px',
+              }}
+            >
               <button
                 type="button"
-                className="btn btn-outline"
+                className="btn btn-outline btn-sm"
                 onClick={() => setImportModalOpen(false)}
                 disabled={importLoading}
               >
-                Cancelar
+                Cerrar
               </button>
               <button
                 type="button"
-                className={`btn ${importMode === 'replace' ? 'btn-danger' : 'btn-primary'}`}
+                className={`btn btn-sm ${importMode === 'replace' ? 'btn-outline' : 'btn-yellow'}`}
+                style={
+                  importMode === 'replace'
+                    ? { backgroundColor: '#dc2626', color: 'white', borderColor: '#dc2626' }
+                    : {}
+                }
                 onClick={ejecutarImportacion}
                 disabled={!selectedFile || importLoading}
               >
-                {importLoading ? (
-                  <>
-                    <RefreshCw size={16} className="spin-anim" />
-                    <span>Procesando nómina…</span>
-                  </>
-                ) : (
-                  <>
-                    <Upload size={16} />
-                    <span>
-                      {importMode === 'replace' ? 'Confirmar y Reemplazar Todo' : 'Procesar y Actualizar'}
-                    </span>
-                  </>
-                )}
+                {importLoading
+                  ? 'Procesando planilla…'
+                  : importMode === 'replace'
+                  ? 'Confirmar Reemplazo Total'
+                  : 'Procesar y Actualizar'}
               </button>
             </div>
           </div>

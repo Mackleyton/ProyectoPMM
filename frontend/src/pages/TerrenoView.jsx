@@ -1,24 +1,5 @@
-import { useState, useRef, useEffect } from 'react';
-import {
-  Search,
-  Camera,
-  CheckSquare,
-  Square,
-  Check,
-  AlertCircle,
-  MapPin,
-  Clock,
-  User,
-  Home,
-  GraduationCap,
-  Phone,
-  Mail,
-  FileText,
-  CheckCircle2,
-  RotateCw,
-  Save,
-  WifiOff,
-} from 'lucide-react';
+import { useState, useRef } from 'react';
+import { Search } from 'lucide-react';
 import { formatRut, validateRut, cleanRut } from '../utils/rutUtils';
 import { apiService } from '../services/apiService';
 import { offlineStorage } from '../services/offlineStorage';
@@ -31,12 +12,15 @@ export default function TerrenoView() {
   const [loading, setLoading] = useState(false);
   const [searchError, setSearchError] = useState('');
 
-  // Datos del apoderado y sus beneficios
+  // Beneficiario encontrado
   const [guardian, setGuardian] = useState(null);
   const [benefits, setBenefits] = useState([]);
+  const [showFicha, setShowFicha] = useState(false);
+
+  // Selección de beneficios para entregar
   const [checkedBenefitIds, setCheckedBenefitIds] = useState(new Set());
 
-  // Foto y metadata del acta
+  // Foto y metadata
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [fotoBlob, setFotoBlob] = useState(null);
   const [fotoDataUrl, setFotoDataUrl] = useState(null);
@@ -66,7 +50,7 @@ export default function TerrenoView() {
     if (e) e.preventDefault();
     const rutLimpio = cleanRut(rutInput);
     if (!rutLimpio) {
-      setSearchError('Por favor ingresa un número de RUT');
+      setSearchError('Por favor ingresa un número de RUT.');
       return;
     }
 
@@ -74,6 +58,7 @@ export default function TerrenoView() {
     setSearchError('');
     setGuardian(null);
     setBenefits([]);
+    setShowFicha(false);
     setCheckedBenefitIds(new Set());
     setFotoBlob(null);
     setFotoDataUrl(null);
@@ -87,7 +72,7 @@ export default function TerrenoView() {
         setGuardian(data.guardian);
         setBenefits(data.benefits || []);
 
-        // Preseleccionar los beneficios en estado PENDING
+        // Seleccionar los pendientes por defecto
         const initialSelected = new Set();
         (data.benefits || []).forEach((b) => {
           if (b.status === 'PENDING') {
@@ -97,7 +82,7 @@ export default function TerrenoView() {
         setCheckedBenefitIds(initialSelected);
       }
     } catch (err) {
-      setSearchError(err.message || 'Error al consultar beneficiario');
+      setSearchError(err.message || 'Error al consultar beneficiario.');
     } finally {
       setLoading(false);
     }
@@ -144,6 +129,7 @@ export default function TerrenoView() {
 
     isSubmittingRef.current = true;
     setLoading(true);
+
     try {
       const benefitIdsArray = Array.from(checkedBenefitIds);
       const fechaNow = new Date().toLocaleTimeString('es-CL');
@@ -153,19 +139,17 @@ export default function TerrenoView() {
       let wasOffline = false;
 
       if (!isOnline) {
-        // MODO OFFLINE: Guardar en cola IndexedDB
         await offlineStorage.savePendingDelivery({
           rut: guardian.rut,
           benefitIds: benefitIdsArray,
           actaBlob: fotoBlob,
-          notes: 'Entrega física en terreno (Modo Offline)',
+          notes: 'Entrega en terreno (Modo Offline)',
           latitude: deliveryMeta?.location?.latitude || null,
           longitude: deliveryMeta?.location?.longitude || null,
           captured_at: deliveryMeta?.capturedAt || new Date().toISOString(),
         });
         wasOffline = true;
       } else {
-        // En línea: Intentar enviar al backend
         try {
           const res = await apiService.registrarEntrega({
             rut: guardian.rut,
@@ -179,7 +163,7 @@ export default function TerrenoView() {
           });
           deliveredResults = res.deliveredBenefits || [];
         } catch (serverErr) {
-          console.warn('Fallo de red con el servidor, guardando en cola offline:', serverErr.message);
+          console.warn('Fallo de conexión, guardando en cola offline:', serverErr.message);
           await offlineStorage.savePendingDelivery({
             rut: guardian.rut,
             benefitIds: benefitIdsArray,
@@ -193,7 +177,7 @@ export default function TerrenoView() {
         }
       }
 
-      // Actualizar estado visual de los beneficios en pantalla
+      // Actualizar estado local
       setBenefits((prev) =>
         prev.map((b) =>
           checkedBenefitIds.has(b.benefitId)
@@ -222,245 +206,241 @@ export default function TerrenoView() {
       setFotoDataUrl(null);
       setDeliveryMeta(null);
     } catch (err) {
-      alert(`Error al registrar la entrega: ${err.message}`);
+      alert(`Error al registrar entrega: ${err.message}`);
     } finally {
       setLoading(false);
       isSubmittingRef.current = false;
     }
   }
 
-  const pendingBenefits = benefits.filter((b) => b.status === 'PENDING');
-  const deliveredBenefitsList = benefits.filter((b) => b.status === 'DELIVERED');
+  const pendingList = benefits.filter((b) => b.status === 'PENDING');
+  const pendingCount = pendingList.length;
 
   return (
     <div className="terreno-view-container">
-      {/* TARJETA DE BÚSQUEDA */}
-      <div className="search-card">
-        <div className="search-card-header">
-          <Search size={22} className="header-icon" />
-          <div>
-            <h2>Consulta y Entrega de Beneficios</h2>
-            <p className="subtitle">
-              Ingresa el RUT del apoderado o del estudiante para consultar y registrar el acta física.
+      {!showFicha ? (
+        /* PANTALLA 1: BÚSQUEDA Y TABLA PRELIMINAR */
+        <div className="terreno-search-card">
+          <div className="screen-header">
+            <h2 className="screen-title">Búsqueda de Beneficiario</h2>
+            <p className="screen-subtitle">
+              Ingresa el RUT del apoderado o alumno para consultar beneficios disponibles
             </p>
           </div>
-        </div>
 
-        <form onSubmit={ejecutarBusqueda} className="search-form-row">
-          <div className="search-input-wrapper">
-            <input
-              type="text"
-              placeholder="Ej. 12.345.678-9"
-              value={rutInput}
-              onChange={handleRutChange}
-              className="rut-large-input"
-              maxLength={12}
-            />
+          <form onSubmit={ejecutarBusqueda} className="search-form-row">
+            <div className="search-input-wrapper">
+              <input
+                type="text"
+                className={`search-input-field ${
+                  rutValidation ? (rutValidation.valid ? 'valid' : 'invalid') : ''
+                }`}
+                placeholder="Ej: 12.345.678-9"
+                value={rutInput}
+                onChange={handleRutChange}
+              />
+              <button
+                type="submit"
+                className="search-action-btn"
+                disabled={loading}
+                title="Buscar"
+              >
+                <Search size={18} />
+              </button>
+            </div>
             {rutValidation && (
-              <span className={`rut-validation-badge ${rutValidation.valid ? 'valid' : 'invalid'}`}>
-                {rutValidation.valid ? <Check size={14} /> : <AlertCircle size={14} />}
-                <span>{rutValidation.valid ? 'RUT Válido' : rutValidation.message}</span>
+              <span className={`rut-validation-msg ${rutValidation.valid ? 'valid' : 'invalid'}`}>
+                {rutValidation.valid ? 'RUT con formato válido' : rutValidation.message}
               </span>
             )}
-          </div>
-          <button
-            type="submit"
-            className="btn btn-primary btn-search"
-            disabled={loading || !rutInput.trim()}
-          >
-            <Search size={18} />
-            <span>{loading ? 'Consultando…' : 'Buscar'}</span>
-          </button>
-        </form>
+          </form>
 
-        {searchError && (
-          <div className="search-error-alert">
-            <AlertCircle size={18} />
-            <span>{searchError}</span>
-          </div>
-        )}
-      </div>
+          {searchError && <div className="terreno-msg-error">{searchError}</div>}
 
-      {/* INFORMACIÓN DEL APODERADO */}
-      {guardian && (
-        <div className="guardian-profile-card">
-          <div className="guardian-profile-header">
-            <div className="guardian-avatar-badge">
-              <User size={24} />
-            </div>
-            <div className="guardian-titles">
-              <h3 className="guardian-name">{guardian.fullName}</h3>
-              <span className="guardian-rut-pill">RUT {guardian.rut}</span>
-            </div>
-          </div>
-
-          <div className="guardian-details-grid">
-            <div className="detail-item">
-              <Home size={15} />
-              <div>
-                <span className="label">Dirección</span>
-                <span className="value">{guardian.address || 'Quilpué'}</span>
-              </div>
-            </div>
-            <div className="detail-item">
-              <MapPin size={15} />
-              <div>
-                <span className="label">Sector Comunal</span>
-                <span className="value">{guardian.sector || 'CENTRO'}</span>
-              </div>
-            </div>
-            <div className="detail-item">
-              <Phone size={15} />
-              <div>
-                <span className="label">Teléfono</span>
-                <span className="value">{guardian.phone || 'No registrado'}</span>
-              </div>
-            </div>
-            <div className="detail-item">
-              <Mail size={15} />
-              <div>
-                <span className="label">Correo Electrónico</span>
-                <span className="value">{guardian.email || 'No registrado'}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* LISTADO DE BENEFICIOS ASIGNADOS */}
-      {guardian && (
-        <div className="benefits-section-card">
-          <div className="benefits-section-header">
-            <div>
-              <h3>Beneficios Escolares Asignados</h3>
-              <p className="subtitle">
-                Marca los beneficios a entregar y adjunta la fotografía del acta física firmada.
-              </p>
-            </div>
-            {pendingBenefits.length > 1 && (
-              <button type="button" className="btn btn-sm btn-outline" onClick={toggleTodos}>
-                {checkedBenefitIds.size === pendingBenefits.length ? 'Deseleccionar todos' : 'Seleccionar todos'}
-              </button>
-            )}
-          </div>
-
-          <div className="benefits-list">
-            {benefits.map((b) => {
-              const isDelivered = b.status === 'DELIVERED';
-              const isChecked = checkedBenefitIds.has(b.benefitId);
-
-              return (
-                <div
-                  key={b.benefitId}
-                  className={`benefit-row-card ${isDelivered ? 'delivered' : 'pending'}`}
-                  onClick={() => !isDelivered && toggleBenefitCheckbox(b.benefitId)}
-                >
-                  <div className="benefit-check-column">
-                    {isDelivered ? (
-                      <span className="badge-delivered-check" title="Entregado">
-                        <Check size={16} />
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        className={`checkbox-toggle-btn ${isChecked ? 'checked' : ''}`}
-                        aria-label="Seleccionar beneficio"
-                      >
-                        {isChecked ? <CheckSquare size={20} /> : <Square size={20} />}
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="benefit-info-column">
-                    <div className="student-name">
-                      <GraduationCap size={16} />
-                      <span>{b.student.fullName}</span>
-                      <small className="student-rut">({b.student.rut})</small>
-                    </div>
-                    <div className="benefit-meta-line">
-                      <span className="benefit-badge-name">{b.benefitName}</span>
-                      <span className="benefit-school">{b.student.establishment}</span>
-                    </div>
-                  </div>
-
-                  <div className="benefit-status-column">
-                    {isDelivered ? (
-                      <div className="delivered-tag">
-                        <CheckCircle2 size={15} />
-                        <span>Entregado {b.deliveredAt ? `(${b.deliveredAt})` : ''}</span>
+          {guardian && (
+            <div className="beneficiarios-table-wrap">
+              <table className="preliminar-table">
+                <thead>
+                  <tr>
+                    <th>Nombre</th>
+                    <th>RUT</th>
+                    <th style={{ textAlign: 'center' }}>Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="clickable-row" onClick={() => setShowFicha(true)}>
+                    <td>
+                      <div className="row-name">{guardian.fullName}</div>
+                      <div className="row-sub">
+                        {benefits.length} beneficio{benefits.length !== 1 ? 's' : ''} asignado{benefits.length !== 1 ? 's' : ''}
                       </div>
-                    ) : (
-                      <span className="pending-tag">Pendiente de entrega</span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* ZONA DE EVIDENCIA Y REGISTRO DE ENTREGA */}
-          {pendingBenefits.length > 0 && (
-            <div className="delivery-action-panel">
-              <div className="action-panel-info">
-                <h4>Respaldo de Entrega con Acta Física</h4>
-                <p>
-                  El funcionario debe entregar el beneficio, solicitar la firma física en el acta y fotografiarla.
-                </p>
-              </div>
-
-              <div className="photo-status-box">
-                {fotoDataUrl ? (
-                  <div className="photo-preview-thumbnail-row">
-                    <img src={fotoDataUrl} alt="Acta capturada" className="acta-thumbnail" />
-                    <div className="thumbnail-meta">
-                      <span className="badge-success-photo">
-                        <Check size={14} /> Acta fotografiada y comprimida
+                    </td>
+                    <td className="row-rut">{guardian.rut}</td>
+                    <td style={{ textAlign: 'center' }}>
+                      <span className={`status-icon-circle ${pendingCount > 0 ? 'yellow' : 'green'}`}>
+                        {pendingCount > 0 ? '−' : '✓'}
                       </span>
-                      {deliveryMeta?.location?.latitude && (
-                        <small className="geo-meta">
-                          <MapPin size={12} /> Coordenadas: {deliveryMeta.location.latitude.toFixed(4)},{' '}
-                          {deliveryMeta.location.longitude.toFixed(4)}
-                        </small>
-                      )}
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-link"
-                        onClick={() => setIsCameraOpen(true)}
-                      >
-                        Cambiar fotografía
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    className="btn btn-yellow btn-capture-acta"
-                    onClick={() => setIsCameraOpen(true)}
-                  >
-                    <Camera size={18} />
-                    <span>Tomar o Subir Foto del Acta Firmada</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      ) : (
+        /* PANTALLA 2: FICHA DE BENEFICIARIO Y ENTREGA */
+        <>
+          <button type="button" className="btn-back-link" onClick={() => setShowFicha(false)}>
+            ← Volver a la búsqueda
+          </button>
+
+          <div className="ficha-card">
+            {/* Datos del Apoderado */}
+            <div className="ficha-section">
+              <h3 className="section-title">Datos del Apoderado</h3>
+              <div className="ficha-grid">
+                <div className="ficha-field">
+                  <label>RUT</label>
+                  <span>{guardian.rut}</span>
+                </div>
+                <div className="ficha-field">
+                  <label>Nombre Completo</label>
+                  <span>{guardian.fullName}</span>
+                </div>
+                <div className="ficha-field">
+                  <label>Dirección</label>
+                  <span>{guardian.address || 'Quilpué'}</span>
+                </div>
+                <div className="ficha-field">
+                  <label>Sector</label>
+                  <span>{guardian.sector || 'CENTRO'}</span>
+                </div>
+                <div className="ficha-field">
+                  <label>Teléfono</label>
+                  <span>{guardian.phone || 'No registrado'}</span>
+                </div>
+                <div className="ficha-field">
+                  <label>Correo</label>
+                  <span>{guardian.email || 'No registrado'}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="ficha-divider" />
+
+            {/* Alumnos y Beneficios Asignados */}
+            <div className="ficha-section">
+              <div className="section-header-flex">
+                <h3 className="section-title">Alumnos y Beneficios Asignados</h3>
+                {pendingCount > 1 && (
+                  <button type="button" className="select-all-btn" onClick={toggleTodos}>
+                    {checkedBenefitIds.size === pendingCount ? 'Deseleccionar todos' : 'Seleccionar todos'}
                   </button>
                 )}
               </div>
 
-              <div className="action-submit-row">
-                <button
-                  type="button"
-                  className="btn btn-success btn-lg btn-confirm-delivery"
-                  onClick={handleRegistrarEntrega}
-                  disabled={loading || checkedBenefitIds.size === 0 || !fotoBlob}
-                >
-                  <Save size={18} />
-                  <span>
+              <div className="alumnos-list">
+                {benefits.map((b) => {
+                  const isDelivered = b.status === 'DELIVERED';
+                  const isSelected = checkedBenefitIds.has(b.benefitId);
+
+                  return (
+                    <div
+                      key={b.benefitId}
+                      className={`alumno-card-item ${isSelected ? 'selected' : ''} ${
+                        isDelivered ? 'delivered' : ''
+                      }`}
+                      onClick={() => !isDelivered && toggleBenefitCheckbox(b.benefitId)}
+                    >
+                      {isDelivered ? (
+                        <span className="badge-delivered-check" title="Entregado">
+                          ✓
+                        </span>
+                      ) : (
+                        <label
+                          className="custom-checkbox-container"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleBenefitCheckbox(b.benefitId)}
+                          />
+                          <span className="checkbox-checkmark" />
+                        </label>
+                      )}
+
+                      <div className="alumno-details-col">
+                        <div className="alumno-name-row">
+                          <strong>{b.student.fullName}</strong>
+                          <span className="alumno-rut-badge">{b.student.rut}</span>
+                        </div>
+                        <div className="alumno-meta-row">
+                          <span>{b.student.establishment}</span>
+                          <span>·</span>
+                          <span>{b.student.educationalLevel}</span>
+                        </div>
+                        <div className="alumno-benefit-tag">{b.benefitName}</div>
+                      </div>
+
+                      <div>
+                        {isDelivered ? (
+                          <span className="status-badge-clean green">Entregado</span>
+                        ) : (
+                          <span className="status-badge-clean yellow">Pendiente</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Captura de Acta y Confirmación */}
+            {pendingCount > 0 && (
+              <>
+                <div className="ficha-divider" />
+                <div className="entrega-action-section">
+                  {fotoDataUrl ? (
+                    <div className="captured-preview-box">
+                      <img src={fotoDataUrl} alt="Acta capturada" className="acta-preview-thumb" />
+                      <div className="captured-meta">
+                        <span>Acta fotografiada y optimizada</span>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline"
+                          onClick={() => setIsCameraOpen(true)}
+                        >
+                          Cambiar fotografía
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn btn-yellow full-width"
+                      onClick={() => setIsCameraOpen(true)}
+                    >
+                      Capturar Acta Firmada
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    className="btn btn-primary full-width"
+                    onClick={handleRegistrarEntrega}
+                    disabled={loading || checkedBenefitIds.size === 0 || !fotoBlob}
+                    style={{ marginTop: '12px' }}
+                  >
                     {loading
                       ? 'Registrando entrega…'
                       : `Confirmar Entrega (${checkedBenefitIds.size} seleccionados)`}
-                  </span>
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </>
       )}
 
       {/* MODAL DE CÁMARA */}
