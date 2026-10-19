@@ -4,28 +4,20 @@ import {
   LayoutDashboard,
   Users,
   Smartphone,
-  Upload,
   ShieldCheck,
   LogOut,
   Download,
-  Monitor,
   Wifi,
   WifiOff,
   RotateCw,
   Search,
   Menu,
   X,
-  FileText,
 } from 'lucide-react';
 import { offlineStorage } from '../services/offlineStorage';
 import { apiService } from '../services/apiService';
 
-export default function Navbar({
-  user,
-  onLogout,
-  isMobileFrame,
-  onToggleMobileFrame,
-}) {
+export default function Navbar({ user, onLogout }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [canInstall, setCanInstall] = useState(false);
@@ -42,7 +34,7 @@ export default function Navbar({
       const count = await offlineStorage.countPendingDeliveries();
       setPendingCount(count);
     } catch {
-      // Ignorar error no crítico
+      // Ignorar
     }
   };
 
@@ -51,7 +43,6 @@ export default function Navbar({
 
     const handleOnline = () => {
       setIsOnline(true);
-      // Auto-sincronizar al recuperar conexión
       handleSync();
     };
     const handleOffline = () => setIsOnline(false);
@@ -61,7 +52,7 @@ export default function Navbar({
 
     const interval = setInterval(updatePendingCount, 8000);
 
-    // Detección PWA
+    // Detección PWA instalable
     const isStandalone =
       window.matchMedia('(display-mode: standalone)').matches ||
       window.navigator.standalone === true;
@@ -100,11 +91,11 @@ export default function Navbar({
     try {
       const res = await offlineStorage.syncAllPending(apiService);
       if (res.synced > 0) {
-        console.log(`[SYNC] ${res.synced} entregas sincronizadas con éxito.`);
+        console.log(`[SYNC] ${res.synced} entregas sincronizadas.`);
       }
       await updatePendingCount();
     } catch (err) {
-      console.warn('Error durante sincronización:', err);
+      console.warn('Error sincronizando:', err);
     } finally {
       setIsSyncing(false);
     }
@@ -120,7 +111,7 @@ export default function Navbar({
       }
     } else if (isIOS) {
       alert(
-        'Para instalar en iPhone o iPad:\n\n1. Pulsa el botón Compartir en Safari.\n2. Elige "Agregar a pantalla de inicio".'
+        'Para instalar en tu iPhone o iPad:\n\n1. Pulsa el botón Compartir en Safari.\n2. Elige "Agregar a pantalla de inicio".'
       );
     }
   };
@@ -142,37 +133,41 @@ export default function Navbar({
           onClick={() => setMenuOpen(!menuOpen)}
           aria-label="Abrir menú"
         >
-          {menuOpen ? <X size={20} /> : <Menu size={20} />}
+          {menuOpen ? <X size={22} /> : <Menu size={22} />}
         </button>
 
         <div className="navbar-brand" onClick={() => navTo(isAdmin ? '/admin/dashboard' : '/terreno')}>
           <div className="navbar-titles">
             <span className="brand-main">QUILPUÉ</span>
-            <span className="brand-sub">BENEFICIOS DIDECO</span>
+            <span className="brand-sub">BENEFICIOS SOCIALES</span>
           </div>
         </div>
 
-        {/* Indicador de Conexión y Estado Offline */}
-        <div className={`connection-pill ${isOnline ? 'online' : 'offline'}`} title={isOnline ? 'Conexión activa con el servidor' : 'Sin conexión a internet (Modo Offline activo)'}>
-          {isOnline ? <Wifi size={13} /> : <WifiOff size={13} />}
-          <span>{isOnline ? 'En línea' : 'Modo Offline'}</span>
+        {/* Indicador de Conexión en Móvil */}
+        <div
+          className={`connection-pill ${isOnline ? 'online' : 'offline'}`}
+          title={isOnline ? 'En línea' : 'Sin conexión'}
+        >
+          {isOnline ? <Wifi size={12} /> : <WifiOff size={12} />}
+          <span className="hide-on-very-small">{isOnline ? 'En línea' : 'Offline'}</span>
         </div>
 
-        {/* Notificación de Entregas en Cola */}
+        {/* Notificación de Entregas Pendientes */}
         {pendingCount > 0 && (
           <button
             type="button"
             className="pending-sync-badge-btn"
             onClick={handleSync}
             disabled={!isOnline || isSyncing}
-            title={`${pendingCount} entregas guardadas en el dispositivo pendientes de subir`}
+            title={`${pendingCount} entregas pendientes`}
           >
-            <RotateCw size={13} className={isSyncing ? 'spin-anim' : ''} />
-            <span>{isSyncing ? 'Sincronizando…' : `${pendingCount} pendiente${pendingCount > 1 ? 's' : ''}`}</span>
+            <RotateCw size={12} className={isSyncing ? 'spin-anim' : ''} />
+            <span>{isSyncing ? 'Subiendo…' : `${pendingCount}`}</span>
           </button>
         )}
       </div>
 
+      {/* Menú de Enlaces (en móvil se despliega como menú vertical completo) */}
       <nav className={`navbar-links ${menuOpen ? 'open' : ''}`}>
         {isAdmin ? (
           <>
@@ -180,28 +175,28 @@ export default function Navbar({
               className={`nav-item-btn ${isActive('/admin/dashboard') ? 'active' : ''}`}
               onClick={() => navTo('/admin/dashboard')}
             >
-              <LayoutDashboard size={17} />
+              <LayoutDashboard size={18} />
               <span>Panel de Gestión</span>
             </button>
             <button
               className={`nav-item-btn ${isActive('/admin/beneficiarios') ? 'active' : ''}`}
               onClick={() => navTo('/admin/beneficiarios')}
             >
-              <Users size={17} />
+              <Users size={18} />
               <span>Beneficiarios</span>
             </button>
             <button
               className={`nav-item-btn ${isActive('/terreno') ? 'active' : ''}`}
               onClick={() => navTo('/terreno')}
             >
-              <Smartphone size={17} />
+              <Smartphone size={18} />
               <span>Modo Terreno</span>
             </button>
             <button
               className={`nav-item-btn ${isActive('/admin/auditoria') ? 'active' : ''}`}
               onClick={() => navTo('/admin/auditoria')}
             >
-              <ShieldCheck size={17} />
+              <ShieldCheck size={18} />
               <span>Auditoría</span>
             </button>
           </>
@@ -211,11 +206,23 @@ export default function Navbar({
               className={`nav-item-btn ${isActive('/terreno') ? 'active' : ''}`}
               onClick={() => navTo('/terreno')}
             >
-              <Search size={17} />
+              <Search size={18} />
               <span>Consultar y Entregar</span>
             </button>
           </>
         )}
+
+        {/* Botón de salir en el menú móvil */}
+        <button
+          className="nav-item-btn logout-mobile-link"
+          onClick={() => {
+            setMenuOpen(false);
+            onLogout();
+          }}
+        >
+          <LogOut size={18} />
+          <span>Cerrar Sesión</span>
+        </button>
       </nav>
 
       <div className="navbar-right">
@@ -224,31 +231,20 @@ export default function Navbar({
             type="button"
             className="btn btn-warning btn-sm btn-install-app"
             onClick={handleInstallClick}
-            title="Instalar aplicación en este dispositivo"
+            title="Instalar App en tu celular"
           >
             <Download size={14} />
-            <span>Instalar App</span>
+            <span className="hide-on-small">Instalar</span>
           </button>
         )}
 
-        {/* Toggle para alternar marco de teléfono en escritorio */}
-        <button
-          className={`device-toggle-btn ${isMobileFrame ? 'active' : ''}`}
-          onClick={onToggleMobileFrame}
-          title={isMobileFrame ? 'Cambiar a Vista Completa' : 'Simular Pantalla Móvil'}
-        >
-          {isMobileFrame ? <Monitor size={15} /> : <Smartphone size={15} />}
-          <span>{isMobileFrame ? 'Vista Completa' : 'Simular Móvil'}</span>
-        </button>
-
         <div className="user-profile-badge">
-          <div className="user-meta">
+          <div className="user-meta hide-on-small">
             <span className="user-name">{user?.name || user?.username || 'Funcionario'}</span>
-            <span className="user-role">{isAdmin ? 'Administrador' : 'Agente Terreno'}</span>
+            <span className="user-role">{isAdmin ? 'Admin' : 'Terreno'}</span>
           </div>
-          <button className="logout-btn" onClick={onLogout} title="Cerrar sesión">
+          <button className="logout-btn" onClick={onLogout} title="Cerrar sesión" aria-label="Cerrar sesión">
             <LogOut size={16} />
-            <span>Salir</span>
           </button>
         </div>
       </div>

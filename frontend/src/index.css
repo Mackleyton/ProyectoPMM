@@ -2645,3 +2645,202 @@ body {
     width: 100% !important;
   }
 }
+
+/* ==========================================================================
+   EXPERIENCIA FLUIDA 100% NATIVA EN DISPOSITIVOS MÓVILES REALES (PWA)
+   ========================================================================== */
+
+html, body {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  position: relative;
+  margin: 0;
+  padding: 0;
+  background-color: var(--color-bg);
+}
+
+.mobile-native-viewport {
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+  box-sizing: border-box;
+}
+
+@media (max-width: 768px) {
+  .mobile-native-viewport {
+    padding: 12px 10px 48px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow-x: hidden !important;
+  }
+
+  .hide-on-small {
+    display: none !important;
+  }
+
+  /* Menú Móvil Nativo de Pantalla Completa */
+  .navbar-links.open {
+    position: fixed !important;
+    top: 56px !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    background-color: var(--color-primary-dark) !important;
+    display: flex !important;
+    flex-direction: column !important;
+    padding: 24px 16px !important;
+    gap: 12px !important;
+    z-index: 9999 !important;
+    overflow-y: auto !important;
+  }
+  .navbar-links.open .nav-item-btn {
+    width: 100% !important;
+    padding: 14px 18px !important;
+    font-size: 1.05rem !important;
+    border-radius: var(--radius-md) !important;
+    background: rgba(255, 255, 255, 0.08) !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 12px !important;
+  }
+  .navbar-links.open .nav-item-btn:hover,
+  .navbar-links.open .nav-item-btn.active {
+    background: rgba(255, 255, 255, 0.2) !important;
+  }
+  .logout-mobile-link {
+    margin-top: auto !important;
+    color: #fca5a5 !important;
+    border: 1px solid rgba(239, 68, 68, 0.4) !important;
+  }
+
+  /* Dashboard Adaptado a Teléfonos */
+  .admin-dashboard-container {
+    width: 100% !important;
+    max-width: 100% !important;
+    gap: 14px !important;
+  }
+  .dashboard-header-row {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 12px !important;
+  }
+  .dashboard-actions {
+    flex-direction: column !important;
+    width: 100% !important;
+    gap: 8px !important;
+  }
+  .dashboard-actions button {
+    width: 100% !important;
+    min-height: 44px !important;
+    justify-content: center !important;
+  }
+
+  /* Tarjetas KPI en Móvil */
+  .kpi-cards-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 8px !important;
+    width: 100% !important;
+  }
+  .kpi-stat-card {
+    padding: 12px 10px !important;
+    border-radius: var(--radius-md) !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+  }
+  .kpi-card-label {
+    font-size: 0.72rem !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+  .kpi-card-value {
+    font-size: 1.45rem !important;
+    margin: 2px 0 !important;
+  }
+  .kpi-card-desc {
+    font-size: 0.68rem !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+
+  /* Gráficos en 1 Columna Fluida */
+  .charts-grid-two {
+    grid-template-columns: 1fr !important;
+    gap: 14px !important;
+    width: 100% !important;
+  }
+  .chart-panel-card {
+    padding: 14px 12px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .donut-chart-container {
+    flex-direction: column !important;
+    align-items: center !important;
+    gap: 12px !important;
+  }
+  .donut-svg-wrap {
+    width: 130px !important;
+    height: 130px !important;
+  }
+
+  /* Modo Terreno en Móvil Real */
+  .terreno-view-container {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 0 !important;
+  }
+  .terreno-search-card {
+    padding: 18px 14px !important;
+  }
+  .ficha-card {
+    padding: 16px 12px !important;
+  }
+  .ficha-grid {
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+  }
+  .btn-yellow, .btn-primary {
+    min-height: 48px !important;
+  }
+
+  /* Beneficiarios en Móvil Real */
+  .beneficiarios-top-bar {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 12px !important;
+  }
+  .top-bar-left {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 10px !important;
+  }
+  .top-bar-left button {
+    width: 100% !important;
+    min-height: 44px !important;
+  }
+  .search-box-pill {
+    width: 100% !important;
+  }
+  .search-box-pill input {
+    width: 100% !important;
+  }
+  .admin-table-card {
+    border-radius: var(--radius-md) !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+  .admin-table th, .admin-table td {
+    padding: 10px 8px !important;
+    font-size: 0.8rem !important;
+  }
+}
+
+@media (max-width: 360px) {
+  .kpi-cards-grid {
+    grid-template-columns: 1fr !important;
+  }
+}

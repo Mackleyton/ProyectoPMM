@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import LoginPage from './pages/LoginPage';
 import TerrenoView from './pages/TerrenoView';
@@ -20,111 +20,54 @@ function ProtectedRoute({ user, requiredRole, children }) {
   return children;
 }
 
-function MainLayout({ user, onLogout, isMobileFrame, onToggleMobileFrame }) {
+function MainLayout({ user, onLogout }) {
   const isAdmin = user?.role === 'ADMIN';
 
   return (
-    <div className={`app-root ${isMobileFrame ? 'simulated-mode' : ''}`}>
-      <Navbar
-        user={user}
-        onLogout={onLogout}
-        isMobileFrame={isMobileFrame}
-        onToggleMobileFrame={onToggleMobileFrame}
-      />
+    <div className="app-root">
+      <Navbar user={user} onLogout={onLogout} />
 
       <main className="app-main-viewport">
-        {isMobileFrame ? (
-          <div className="smartphone-simulator-wrapper">
-            <div className="smartphone-frame">
-              <div className="phone-notch">
-                <span className="notch-speaker" />
-                <span className="notch-camera" />
-              </div>
-              <div className="phone-screen-content">
-                <Routes>
-                  <Route
-                    path="/terreno"
-                    element={
-                      <ProtectedRoute user={user}>
-                        <TerrenoView />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/admin/dashboard"
-                    element={
-                      <ProtectedRoute user={user} requiredRole="ADMIN">
-                        <AdminDashboardPage />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/admin/beneficiarios"
-                    element={
-                      <ProtectedRoute user={user} requiredRole="ADMIN">
-                        <AdminBeneficiariosPage />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/admin/auditoria"
-                    element={
-                      <ProtectedRoute user={user} requiredRole="ADMIN">
-                        <AdminAuditoriaPage />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="*"
-                    element={<Navigate to={isAdmin ? '/admin/dashboard' : '/terreno'} replace />}
-                  />
-                </Routes>
-              </div>
-              <div className="phone-home-indicator" />
-            </div>
-          </div>
-        ) : (
-          <div className="standard-view-wrapper">
-            <Routes>
-              <Route
-                path="/terreno"
-                element={
-                  <ProtectedRoute user={user}>
-                    <TerrenoView />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/admin/dashboard"
-                element={
-                  <ProtectedRoute user={user} requiredRole="ADMIN">
-                    <AdminDashboardPage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/admin/beneficiarios"
-                element={
-                  <ProtectedRoute user={user} requiredRole="ADMIN">
-                    <AdminBeneficiariosPage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/admin/auditoria"
-                element={
-                  <ProtectedRoute user={user} requiredRole="ADMIN">
-                    <AdminAuditoriaPage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="*"
-                element={<Navigate to={isAdmin ? '/admin/dashboard' : '/terreno'} replace />}
-              />
-            </Routes>
-          </div>
-        )}
+        <div className="mobile-native-viewport">
+          <Routes>
+            <Route
+              path="/terreno"
+              element={
+                <ProtectedRoute user={user}>
+                  <TerrenoView />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/dashboard"
+              element={
+                <ProtectedRoute user={user} requiredRole="ADMIN">
+                  <AdminDashboardPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/beneficiarios"
+              element={
+                <ProtectedRoute user={user} requiredRole="ADMIN">
+                  <AdminBeneficiariosPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/auditoria"
+              element={
+                <ProtectedRoute user={user} requiredRole="ADMIN">
+                  <AdminAuditoriaPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="*"
+              element={<Navigate to={isAdmin ? '/admin/dashboard' : '/terreno'} replace />}
+            />
+          </Routes>
+        </div>
       </main>
     </div>
   );
@@ -132,7 +75,6 @@ function MainLayout({ user, onLogout, isMobileFrame, onToggleMobileFrame }) {
 
 export default function App() {
   const [user, setUser] = useState(() => apiService.getCurrentUser());
-  const [isMobileFrame, setIsMobileFrame] = useState(false);
 
   function handleLogin(loggedUser) {
     setUser(loggedUser);
@@ -160,12 +102,7 @@ export default function App() {
           path="/*"
           element={
             user ? (
-              <MainLayout
-                user={user}
-                onLogout={handleLogout}
-                isMobileFrame={isMobileFrame}
-                onToggleMobileFrame={() => setIsMobileFrame(!isMobileFrame)}
-              />
+              <MainLayout user={user} onLogout={handleLogout} />
             ) : (
               <Navigate to="/login" replace />
             )
