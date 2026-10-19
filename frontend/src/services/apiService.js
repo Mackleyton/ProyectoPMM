@@ -3,7 +3,6 @@ import { cleanRut } from '../utils/rutUtils';
 const TOKEN_KEY = 'beneficios_token';
 const USER_KEY = 'beneficios_user';
 
-// Soporte para URL base del backend si se despliega en Render con front y back separados
 export const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 
 export const authStorage = {
@@ -33,9 +32,6 @@ export const authStorage = {
   },
 };
 
-/**
- * Obtiene los encabezados HTTP estándar con el token JWT
- */
 function getAuthHeaders(isJson = false) {
   const headers = {};
   const token = authStorage.getToken();
@@ -49,9 +45,6 @@ function getAuthHeaders(isJson = false) {
 }
 
 export const apiService = {
-  /**
-   * Verifica la conectividad con el backend
-   */
   async isBackendAvailable() {
     try {
       const res = await fetch(`${API_BASE}/api/health`, {
@@ -64,9 +57,6 @@ export const apiService = {
     }
   },
 
-  /**
-   * Iniciar sesión en el backend con credenciales reales (admin o terreno)
-   */
   async login(username, password) {
     const res = await fetch(`${API_BASE}/api/auth/login`, {
       method: 'POST',
@@ -90,23 +80,14 @@ export const apiService = {
     return data;
   },
 
-  /**
-   * Cerrar sesión
-   */
   logout() {
     authStorage.clear();
   },
 
-  /**
-   * Obtener usuario actual en sesión
-   */
   getCurrentUser() {
     return authStorage.getUser();
   },
 
-  /**
-   * Búsqueda de beneficiarios por RUT (apoderado o alumno) en el backend
-   */
   async buscarPorRut(rutIngresado) {
     const rutLimpio = cleanRut(rutIngresado);
     if (!rutLimpio) throw new Error('Debe ingresar un RUT válido');
@@ -129,29 +110,34 @@ export const apiService = {
     };
   },
 
-  /**
-   * Registro de entrega con fotografía de respaldo en el backend
-   * @param {Object} payload
-   * @param {string} payload.rut - RUT del apoderado
-   * @param {string[]} payload.benefitIds - Lista de UUIDs de beneficios a entregar
-   * @param {File|Blob} payload.actaFile - Fotografía del acta
-   * @param {string} [payload.notes] - Observaciones
-   */
-  async registrarEntrega({ rut, benefitIds, actaFile, notes }) {
+  async registrarEntrega({
+    rut,
+    benefitIds,
+    actaFile,
+    notes,
+    latitude = null,
+    longitude = null,
+    captured_at = null,
+    sync_status = 'SYNCED',
+  }) {
     if (!rut) throw new Error('El RUT del apoderado es obligatorio');
     if (!benefitIds || benefitIds.length === 0) {
       throw new Error('Debe seleccionar al menos un beneficio');
     }
     if (!actaFile) {
-      throw new Error('La fotografía del acta firmada es obligatoria');
+      throw new Error('La fotografía del acta física firmada es obligatoria');
     }
 
     const formData = new FormData();
     formData.append('rut', rut);
     formData.append('benefitIds', JSON.stringify(benefitIds));
-    formData.append('notes', notes || 'Entrega en terreno');
+    formData.append('notes', notes || 'Entrega física en terreno');
 
-    // Asegurar que el archivo tenga nombre y extensión
+    if (latitude !== null && latitude !== undefined) formData.append('latitude', latitude);
+    if (longitude !== null && longitude !== undefined) formData.append('longitude', longitude);
+    if (captured_at) formData.append('captured_at', captured_at);
+    if (sync_status) formData.append('sync_status', sync_status);
+
     if (actaFile instanceof Blob && !actaFile.name) {
       formData.append('acta', actaFile, `acta_${Date.now()}.jpg`);
     } else {
@@ -173,9 +159,6 @@ export const apiService = {
     return data;
   },
 
-  /**
-   * Obtiene indicadores y métricas de gestión en tiempo real
-   */
   async obtenerKpis() {
     const res = await fetch(`${API_BASE}/api/reports/kpis`, {
       method: 'GET',
@@ -208,9 +191,6 @@ export const apiService = {
     };
   },
 
-  /**
-   * Obtiene la nómina de beneficiarios filtrada desde el backend
-   */
   async obtenerBeneficiarios({ search = '', estado = 'TODOS' } = {}) {
     const query = new URLSearchParams();
     if (search) query.append('search', search);
@@ -232,12 +212,15 @@ export const apiService = {
 
   /**
    * Carga masiva de planilla Excel (.xlsx / .xls)
+   * @param {File} file
+   * @param {'update'|'replace'} mode - Modo de importación: 'update' (conserva y añade) o 'replace' (reemplaza todo)
    */
-  async subirPlanillaExcel(file) {
+  async subirPlanillaExcel(file, mode = 'update') {
     if (!file) throw new Error('Debe adjuntar un archivo');
 
     const formData = new FormData();
     formData.append('excel', file);
+    formData.append('mode', mode);
 
     const res = await fetch(`${API_BASE}/api/imports/beneficiaries`, {
       method: 'POST',
@@ -254,9 +237,23 @@ export const apiService = {
     return data;
   },
 
-  /**
-   * Descarga el reporte CSV anonimizado para la Ley de Transparencia (21.180)
-   */
+  async obtenerAuditLogs({ limit = 100, action = '' } = {}) {
+    const query = new URLSearchParams();
+    if (limit) query.append('limit', limit);
+    if (action) query.append('action', action);
+
+    const res = await fetch(`${API_BASE}/api/admin/audit-logs?${query.toString()}`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.message || 'Error al obtener bitácora de auditoría');
+    }
+    return data.logs || [];
+  },
+
   async exportarTransparenciaCSV() {
     const res = await fetch(`${API_BASE}/api/reports/transparency.csv`, {
       method: 'GET',

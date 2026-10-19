@@ -1,10 +1,28 @@
 import { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import {
+  LayoutDashboard,
+  Users,
+  Smartphone,
+  Upload,
+  ShieldCheck,
+  LogOut,
+  Download,
+  Monitor,
+  Wifi,
+  WifiOff,
+  RotateCw,
+  Search,
+  Menu,
+  X,
+  FileText,
+} from 'lucide-react';
+import { offlineStorage } from '../services/offlineStorage';
+import { apiService } from '../services/apiService';
 
 export default function Navbar({
   user,
   onLogout,
-  currentTab,
-  onTabChange,
   isMobileFrame,
   onToggleMobileFrame,
 }) {
@@ -12,34 +30,85 @@ export default function Navbar({
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [canInstall, setCanInstall] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const updatePendingCount = async () => {
+    try {
+      const count = await offlineStorage.countPendingDeliveries();
+      setPendingCount(count);
+    } catch {
+      // Ignorar error no crítico
+    }
+  };
 
   useEffect(() => {
-    // Detectar si ya está en modo app standalone
+    updatePendingCount();
+
+    const handleOnline = () => {
+      setIsOnline(true);
+      // Auto-sincronizar al recuperar conexión
+      handleSync();
+    };
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    const interval = setInterval(updatePendingCount, 8000);
+
+    // Detección PWA
     const isStandalone =
       window.matchMedia('(display-mode: standalone)').matches ||
       window.navigator.standalone === true;
 
-    if (isStandalone) {
-      return; // Ya está instalada como aplicación nativa
+    if (!isStandalone) {
+      const ua = window.navigator.userAgent.toLowerCase();
+      if (/iphone|ipad|ipod/.test(ua) && !window.MSStream) {
+        setIsIOS(true);
+      }
+
+      const handleBeforeInstall = (e) => {
+        e.preventDefault();
+        setDeferredPrompt(e);
+        setCanInstall(true);
+      };
+
+      window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+      return () => {
+        window.removeEventListener('online', handleOnline);
+        window.removeEventListener('offline', handleOffline);
+        window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+        clearInterval(interval);
+      };
     }
 
-    // Detectar iOS Safari
-    const ua = window.navigator.userAgent.toLowerCase();
-    const isIosDevice = /iphone|ipad|ipod/.test(ua) && !window.MSStream;
-    if (isIosDevice) {
-      setIsIOS(true);
-    }
-
-    // Capturar evento PWA en Android, Chrome, Edge
-    const handleBeforeInstall = (e) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
-      setCanInstall(true);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      clearInterval(interval);
     };
-
-    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
-    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
   }, []);
+
+  const handleSync = async () => {
+    if (isSyncing || !navigator.onLine) return;
+    setIsSyncing(true);
+    try {
+      const res = await offlineStorage.syncAllPending(apiService);
+      if (res.synced > 0) {
+        console.log(`[SYNC] ${res.synced} entregas sincronizadas con éxito.`);
+      }
+      await updatePendingCount();
+    } catch (err) {
+      console.warn('Error durante sincronización:', err);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const handleInstallClick = async () => {
     if (deferredPrompt) {
@@ -51,12 +120,19 @@ export default function Navbar({
       }
     } else if (isIOS) {
       alert(
-        'Para instalar en tu iPhone o iPad:\n\n1. Toca el botón Compartir ⎋ (abajo en la barra de Safari).\n2. Selecciona "Agregar a pantalla de inicio" 📲.\n3. La app quedará lista en tu pantalla.'
+        'Para instalar en iPhone o iPad:\n\n1. Pulsa el botón Compartir en Safari.\n2. Elige "Agregar a pantalla de inicio".'
       );
     }
   };
 
   const isAdmin = user?.role === 'ADMIN' || user?.role === 'admin';
+
+  const navTo = (path) => {
+    navigate(path);
+    setMenuOpen(false);
+  };
+
+  const isActive = (path) => location.pathname === path;
 
   return (
     <header className="main-navbar">
@@ -66,93 +142,92 @@ export default function Navbar({
           onClick={() => setMenuOpen(!menuOpen)}
           aria-label="Abrir menú"
         >
-          <span className="hamburger-line" />
-          <span className="hamburger-line" />
-          <span className="hamburger-line" />
+          {menuOpen ? <X size={20} /> : <Menu size={20} />}
         </button>
 
-        <div className="navbar-brand">
-          <img
-            src={`${import.meta.env.BASE_URL}assets/logo-white-horiz.png`}
-            alt="Municipalidad de Quilpué"
-            className="navbar-logo-img"
-            onError={(e) => {
-              // Si falla la ruta de assets, fallback a logo texto institucional
-              e.currentTarget.style.display = 'none';
-            }}
-          />
+        <div className="navbar-brand" onClick={() => navTo(isAdmin ? '/admin/dashboard' : '/terreno')}>
           <div className="navbar-titles">
             <span className="brand-main">QUILPUÉ</span>
-            <span className="brand-sub">MUNICIPALIDAD</span>
+            <span className="brand-sub">BENEFICIOS DIDECO</span>
           </div>
         </div>
+
+        {/* Indicador de Conexión y Estado Offline */}
+        <div className={`connection-pill ${isOnline ? 'online' : 'offline'}`} title={isOnline ? 'Conexión activa con el servidor' : 'Sin conexión a internet (Modo Offline activo)'}>
+          {isOnline ? <Wifi size={13} /> : <WifiOff size={13} />}
+          <span>{isOnline ? 'En línea' : 'Modo Offline'}</span>
+        </div>
+
+        {/* Notificación de Entregas en Cola */}
+        {pendingCount > 0 && (
+          <button
+            type="button"
+            className="pending-sync-badge-btn"
+            onClick={handleSync}
+            disabled={!isOnline || isSyncing}
+            title={`${pendingCount} entregas guardadas en el dispositivo pendientes de subir`}
+          >
+            <RotateCw size={13} className={isSyncing ? 'spin-anim' : ''} />
+            <span>{isSyncing ? 'Sincronizando…' : `${pendingCount} pendiente${pendingCount > 1 ? 's' : ''}`}</span>
+          </button>
+        )}
       </div>
 
       <nav className={`navbar-links ${menuOpen ? 'open' : ''}`}>
         {isAdmin ? (
           <>
             <button
-              className={`nav-item-btn ${currentTab === 'dashboard' ? 'active' : ''}`}
-              onClick={() => {
-                onTabChange('dashboard');
-                setMenuOpen(false);
-              }}
+              className={`nav-item-btn ${isActive('/admin/dashboard') ? 'active' : ''}`}
+              onClick={() => navTo('/admin/dashboard')}
             >
-              📊 Panel de Gestión
+              <LayoutDashboard size={17} />
+              <span>Panel de Gestión</span>
             </button>
             <button
-              className={`nav-item-btn ${currentTab === 'beneficiarios' ? 'active' : ''}`}
-              onClick={() => {
-                onTabChange('beneficiarios');
-                setMenuOpen(false);
-              }}
+              className={`nav-item-btn ${isActive('/admin/beneficiarios') ? 'active' : ''}`}
+              onClick={() => navTo('/admin/beneficiarios')}
             >
-              👥 Beneficiarios
+              <Users size={17} />
+              <span>Beneficiarios</span>
             </button>
             <button
-              className={`nav-item-btn ${currentTab === 'terreno' ? 'active' : ''}`}
-              onClick={() => {
-                onTabChange('terreno');
-                setMenuOpen(false);
-              }}
+              className={`nav-item-btn ${isActive('/terreno') ? 'active' : ''}`}
+              onClick={() => navTo('/terreno')}
             >
-              📱 Modo Terreno
+              <Smartphone size={17} />
+              <span>Modo Terreno</span>
             </button>
             <button
-              className={`nav-item-btn ${currentTab === 'upload' ? 'active' : ''}`}
-              onClick={() => {
-                onTabChange('upload');
-                setMenuOpen(false);
-              }}
+              className={`nav-item-btn ${isActive('/admin/auditoria') ? 'active' : ''}`}
+              onClick={() => navTo('/admin/auditoria')}
             >
-              📤 Importar Planilla
+              <ShieldCheck size={17} />
+              <span>Auditoría</span>
             </button>
           </>
         ) : (
           <>
             <button
-              className={`nav-item-btn ${currentTab === 'terreno' ? 'active' : ''}`}
-              onClick={() => {
-                onTabChange('terreno');
-                setMenuOpen(false);
-              }}
+              className={`nav-item-btn ${isActive('/terreno') ? 'active' : ''}`}
+              onClick={() => navTo('/terreno')}
             >
-              🔍 Consultar & Entregar
+              <Search size={17} />
+              <span>Consultar y Entregar</span>
             </button>
           </>
         )}
       </nav>
 
       <div className="navbar-right">
-        {/* Botón de instalación PWA en móviles / navegadores compatibles */}
         {(canInstall || isIOS) && (
           <button
             type="button"
             className="btn btn-warning btn-sm btn-install-app"
             onClick={handleInstallClick}
-            title="Instalar como aplicación en este dispositivo"
+            title="Instalar aplicación en este dispositivo"
           >
-            📲 Instalar App
+            <Download size={14} />
+            <span>Instalar App</span>
           </button>
         )}
 
@@ -162,17 +237,18 @@ export default function Navbar({
           onClick={onToggleMobileFrame}
           title={isMobileFrame ? 'Cambiar a Vista Completa' : 'Simular Pantalla Móvil'}
         >
-          {isMobileFrame ? '💻 Vista Completa' : '📱 Simular Móvil'}
+          {isMobileFrame ? <Monitor size={15} /> : <Smartphone size={15} />}
+          <span>{isMobileFrame ? 'Vista Completa' : 'Simular Móvil'}</span>
         </button>
 
         <div className="user-profile-badge">
-          <span className="user-avatar">{isAdmin ? '👔' : '📋'}</span>
           <div className="user-meta">
-            <span className="user-name">{user?.name || 'Funcionario'}</span>
-            <span className="user-role">{isAdmin ? 'Administrador' : 'Terreno'}</span>
+            <span className="user-name">{user?.name || user?.username || 'Funcionario'}</span>
+            <span className="user-role">{isAdmin ? 'Administrador' : 'Agente Terreno'}</span>
           </div>
           <button className="logout-btn" onClick={onLogout} title="Cerrar sesión">
-            ↩ Salir
+            <LogOut size={16} />
+            <span>Salir</span>
           </button>
         </div>
       </div>

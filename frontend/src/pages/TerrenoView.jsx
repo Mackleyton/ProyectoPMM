@@ -1,6 +1,27 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import {
+  Search,
+  Camera,
+  CheckSquare,
+  Square,
+  Check,
+  AlertCircle,
+  MapPin,
+  Clock,
+  User,
+  Home,
+  GraduationCap,
+  Phone,
+  Mail,
+  FileText,
+  CheckCircle2,
+  RotateCw,
+  Save,
+  WifiOff,
+} from 'lucide-react';
 import { formatRut, validateRut, cleanRut } from '../utils/rutUtils';
 import { apiService } from '../services/apiService';
+import { offlineStorage } from '../services/offlineStorage';
 import CameraModal from '../components/CameraModal';
 import SuccessModal from '../components/SuccessModal';
 
@@ -10,24 +31,23 @@ export default function TerrenoView() {
   const [loading, setLoading] = useState(false);
   const [searchError, setSearchError] = useState('');
 
-  // Datos del apoderado y sus beneficios devueltos por el backend
+  // Datos del apoderado y sus beneficios
   const [guardian, setGuardian] = useState(null);
   const [benefits, setBenefits] = useState([]);
   const [checkedBenefitIds, setCheckedBenefitIds] = useState(new Set());
 
-  // Foto del acta
+  // Foto y metadata del acta
   const [isCameraOpen, setIsCameraOpen] = useState(false);
-  const [fotoFile, setFotoFile] = useState(null);
+  const [fotoBlob, setFotoBlob] = useState(null);
   const [fotoDataUrl, setFotoDataUrl] = useState(null);
+  const [deliveryMeta, setDeliveryMeta] = useState(null);
 
   // Modal de éxito
   const [showSuccess, setShowSuccess] = useState(false);
   const [entregaExitosaData, setEntregaExitosaData] = useState(null);
 
-  const inputRef = useRef(null);
   const isSubmittingRef = useRef(false);
 
-  // Manejar escritura de RUT con formateo dinámico
   function handleRutChange(e) {
     const raw = e.target.value;
     const formatted = formatRut(raw);
@@ -46,7 +66,7 @@ export default function TerrenoView() {
     if (e) e.preventDefault();
     const rutLimpio = cleanRut(rutInput);
     if (!rutLimpio) {
-      setSearchError('Por favor ingrese un número de RUT');
+      setSearchError('Por favor ingresa un número de RUT');
       return;
     }
 
@@ -55,8 +75,9 @@ export default function TerrenoView() {
     setGuardian(null);
     setBenefits([]);
     setCheckedBenefitIds(new Set());
-    setFotoFile(null);
+    setFotoBlob(null);
     setFotoDataUrl(null);
+    setDeliveryMeta(null);
 
     try {
       const data = await apiService.buscarPorRut(rutLimpio);
@@ -66,7 +87,7 @@ export default function TerrenoView() {
         setGuardian(data.guardian);
         setBenefits(data.benefits || []);
 
-        // Preseleccionar beneficios que estén en estado PENDING
+        // Preseleccionar los beneficios en estado PENDING
         const initialSelected = new Set();
         (data.benefits || []).forEach((b) => {
           if (b.status === 'PENDING') {
@@ -102,20 +123,21 @@ export default function TerrenoView() {
     }
   }
 
-  function handlePhotoCaptured(file, dataUrl) {
-    setFotoFile(file);
+  function handlePhotoCaptured(blob, dataUrl, meta) {
+    setFotoBlob(blob);
     setFotoDataUrl(dataUrl);
+    setDeliveryMeta(meta);
   }
 
   async function handleRegistrarEntrega() {
     if (isSubmittingRef.current || loading) return;
 
     if (checkedBenefitIds.size === 0) {
-      alert('Debe marcar al menos un beneficio con el checkbox para realizar la entrega.');
+      alert('Debes seleccionar al menos un beneficio pendiente para realizar la entrega.');
       return;
     }
-    if (!fotoFile && !fotoDataUrl) {
-      alert('Es obligatorio capturar la fotografía del acta física firmada.');
+    if (!fotoBlob) {
+      alert('Es obligatorio adjuntar la fotografía del acta física firmada.');
       setIsCameraOpen(true);
       return;
     }
@@ -124,24 +146,54 @@ export default function TerrenoView() {
     setLoading(true);
     try {
       const benefitIdsArray = Array.from(checkedBenefitIds);
+      const fechaNow = new Date().toLocaleTimeString('es-CL');
+      const isOnline = navigator.onLine;
 
-      // Si tenemos dataUrl pero no File, convertir a File
-      let fileToSend = fotoFile;
-      if (!fileToSend && fotoDataUrl) {
-        const resBlob = await fetch(fotoDataUrl);
-        const blob = await resBlob.blob();
-        fileToSend = new File([blob], `acta_${Date.now()}.jpg`, { type: 'image/jpeg' });
+      let deliveredResults = [];
+      let wasOffline = false;
+
+      if (!isOnline) {
+        // MODO OFFLINE: Guardar en cola IndexedDB
+        await offlineStorage.savePendingDelivery({
+          rut: guardian.rut,
+          benefitIds: benefitIdsArray,
+          actaBlob: fotoBlob,
+          notes: 'Entrega física en terreno (Modo Offline)',
+          latitude: deliveryMeta?.location?.latitude || null,
+          longitude: deliveryMeta?.location?.longitude || null,
+          captured_at: deliveryMeta?.capturedAt || new Date().toISOString(),
+        });
+        wasOffline = true;
+      } else {
+        // En línea: Intentar enviar al backend
+        try {
+          const res = await apiService.registrarEntrega({
+            rut: guardian.rut,
+            benefitIds: benefitIdsArray,
+            actaFile: fotoBlob,
+            notes: 'Entrega física en terreno',
+            latitude: deliveryMeta?.location?.latitude || null,
+            longitude: deliveryMeta?.location?.longitude || null,
+            captured_at: deliveryMeta?.capturedAt || new Date().toISOString(),
+            sync_status: 'SYNCED',
+          });
+          deliveredResults = res.deliveredBenefits || [];
+        } catch (serverErr) {
+          console.warn('Fallo de red con el servidor, guardando en cola offline:', serverErr.message);
+          await offlineStorage.savePendingDelivery({
+            rut: guardian.rut,
+            benefitIds: benefitIdsArray,
+            actaBlob: fotoBlob,
+            notes: 'Entrega física en terreno (Fallo temporal de conexión)',
+            latitude: deliveryMeta?.location?.latitude || null,
+            longitude: deliveryMeta?.location?.longitude || null,
+            captured_at: deliveryMeta?.capturedAt || new Date().toISOString(),
+          });
+          wasOffline = true;
+        }
       }
 
-      const res = await apiService.registrarEntrega({
-        rut: guardian.rut,
-        benefitIds: benefitIdsArray,
-        actaFile: fileToSend,
-        notes: 'Entrega en terreno - Quilpué',
-      });
-
-      // Actualizar estado local de los beneficios a DELIVERED
-      const fechaNow = new Date().toLocaleString('es-CL');
+      // Actualizar estado visual de los beneficios en pantalla
       setBenefits((prev) =>
         prev.map((b) =>
           checkedBenefitIds.has(b.benefitId)
@@ -150,294 +202,264 @@ export default function TerrenoView() {
         )
       );
 
-      // Preparar datos para el modal de éxito
-      const entregados = benefits
-        .filter((b) => checkedBenefitIds.has(b.benefitId))
-        .map((b) => ({
-          nombre_alumno: b.student?.fullName || 'Alumno',
-          rut_alumno: b.student?.rut || '',
-          nivel_educacional: b.student?.educationalLevel || b.benefitName,
-        }));
-
       setEntregaExitosaData({
-        apoderado: {
-          nombre_apoderado: guardian.fullName,
-          rut_apoderado: guardian.rut,
-        },
-        beneficiarios: entregados,
-        fecha: res.delivery?.deliveredAt || fechaNow,
+        guardianName: guardian.fullName,
+        rut: guardian.rut,
+        deliveredBenefits:
+          deliveredResults.length > 0
+            ? deliveredResults
+            : benefits
+                .filter((b) => checkedBenefitIds.has(b.benefitId))
+                .map((b) => ({ studentName: b.student.fullName, benefitName: b.benefitName })),
+        timestamp: fechaNow,
+        location: deliveryMeta?.location,
+        isOffline: wasOffline,
       });
 
-      setCheckedBenefitIds(new Set());
-      setFotoFile(null);
-      setFotoDataUrl(null);
       setShowSuccess(true);
+      setCheckedBenefitIds(new Set());
+      setFotoBlob(null);
+      setFotoDataUrl(null);
+      setDeliveryMeta(null);
     } catch (err) {
-      alert('Error al registrar entrega: ' + err.message);
+      alert(`Error al registrar la entrega: ${err.message}`);
     } finally {
       setLoading(false);
       isSubmittingRef.current = false;
     }
   }
 
-  function handleCerrarExito() {
-    setShowSuccess(false);
-    setEntregaExitosaData(null);
-    setGuardian(null);
-    setBenefits([]);
-    setCheckedBenefitIds(new Set());
-    setFotoFile(null);
-    setFotoDataUrl(null);
-    setRutInput('');
-    inputRef.current?.focus();
-  }
-
   const pendingBenefits = benefits.filter((b) => b.status === 'PENDING');
+  const deliveredBenefitsList = benefits.filter((b) => b.status === 'DELIVERED');
 
   return (
     <div className="terreno-view-container">
-      {/* VISTA 1: BÚSQUEDA Y RESULTADOS PRELIMINARES */}
-      {!guardian ? (
-        <div className="terreno-search-card">
-          <div className="screen-header">
-            <h2 className="screen-title">Beneficiarios</h2>
-            <p className="screen-subtitle">
-              Ingrese RUT del apoderado o del estudiante para consultar y registrar entregas
+      {/* TARJETA DE BÚSQUEDA */}
+      <div className="search-card">
+        <div className="search-card-header">
+          <Search size={22} className="header-icon" />
+          <div>
+            <h2>Consulta y Entrega de Beneficios</h2>
+            <p className="subtitle">
+              Ingresa el RUT del apoderado o del estudiante para consultar y registrar el acta física.
             </p>
           </div>
-
-          <form className="search-form-row" onSubmit={ejecutarBusqueda}>
-            <div className="search-input-wrapper">
-              <input
-                ref={inputRef}
-                type="text"
-                className={`search-input-field ${
-                  rutValidation ? (rutValidation.isValid ? 'valid' : 'invalid') : ''
-                }`}
-                placeholder="Ejemplo: 16.033.988-8"
-                value={rutInput}
-                onChange={handleRutChange}
-                autoFocus
-              />
-              <button
-                type="submit"
-                className="search-action-btn"
-                disabled={loading || !rutInput.trim()}
-                title="Buscar"
-              >
-                {loading ? '…' : '🔍'}
-              </button>
-            </div>
-            {rutValidation && !rutValidation.isValid && (
-              <span className="rut-validation-msg invalid">⚠️ {rutValidation.error}</span>
-            )}
-            {rutValidation && rutValidation.isValid && (
-              <span className="rut-validation-msg valid">✓ Formato y RUT válido</span>
-            )}
-          </form>
-
-          {searchError && <div className="terreno-msg-error">⚠️ {searchError}</div>}
-
-          {/* Tips de búsqueda rápida con datos de la planilla */}
-          <div style={{ marginTop: '1.5rem', padding: '1rem', background: '#f8fafc', borderRadius: '8px', fontSize: '0.85rem', color: '#64748b' }}>
-            <p style={{ margin: '0 0 0.5rem 0', fontWeight: 'bold' }}>💡 RUTs de beneficiarios (Planilla Excel):</p>
-            <ul style={{ margin: 0, paddingLeft: '1.2rem', lineHeight: '1.5' }}>
-              <li><code>15.234.567-8</code> — Juan Pérez Gómez (Alumno: Pedro Pérez Díaz - Quilpué Centro)</li>
-              <li><code>12.876.543-2</code> — Ana Silva Rojas (Alumna: Sofía Muñoz Silva - Belloto Norte)</li>
-              <li><code>16.432.109-7</code> — Carlos Valenzuela Soto (Alumno: Lucas Valenzuela Castro)</li>
-              <li><code>17.890.123-4</code> — Luis Castro Romero (Mesa 3 - 12:00)</li>
-              <li><code>14.567.890-0</code> — Mauricio Vera (Ya entregado previamente)</li>
-            </ul>
-          </div>
         </div>
-      ) : (
-        /* VISTA 2: FICHA DE ENTREGA Y CHECKBOXES DE BENEFICIOS */
-        <div className="terreno-ficha-container">
-          <button
-            type="button"
-            className="btn-back-link"
-            onClick={() => {
-              setGuardian(null);
-              setBenefits([]);
-            }}
-          >
-            ‹ Volver a Buscar
-          </button>
 
-          <div className="ficha-card">
-            {/* SECCIÓN APODERADO */}
-            <div className="ficha-section">
-              <h3 className="section-title">Apoderado Responsable</h3>
-              <div className="ficha-grid">
-                <div className="ficha-field">
-                  <label>Nombre Completo</label>
-                  <span>{guardian.fullName || '—'}</span>
-                </div>
-                <div className="ficha-field">
-                  <label>RUT</label>
-                  <span>{guardian.rut || '—'}</span>
-                </div>
-                <div className="ficha-field">
-                  <label>Dirección</label>
-                  <span>{guardian.address || 'Quilpué'}</span>
-                </div>
-                <div className="ficha-field">
-                  <label>Sector</label>
-                  <span>{guardian.sector || 'CENTRO'}</span>
-                </div>
-                <div className="ficha-field">
-                  <label>Correo Electrónico</label>
-                  <span>{guardian.email || '—'}</span>
-                </div>
-                <div className="ficha-field">
-                  <label>Teléfono</label>
-                  <span>{guardian.phone || '—'}</span>
-                </div>
+        <form onSubmit={ejecutarBusqueda} className="search-form-row">
+          <div className="search-input-wrapper">
+            <input
+              type="text"
+              placeholder="Ej. 12.345.678-9"
+              value={rutInput}
+              onChange={handleRutChange}
+              className="rut-large-input"
+              maxLength={12}
+            />
+            {rutValidation && (
+              <span className={`rut-validation-badge ${rutValidation.valid ? 'valid' : 'invalid'}`}>
+                {rutValidation.valid ? <Check size={14} /> : <AlertCircle size={14} />}
+                <span>{rutValidation.valid ? 'RUT Válido' : rutValidation.message}</span>
+              </span>
+            )}
+          </div>
+          <button
+            type="submit"
+            className="btn btn-primary btn-search"
+            disabled={loading || !rutInput.trim()}
+          >
+            <Search size={18} />
+            <span>{loading ? 'Consultando…' : 'Buscar'}</span>
+          </button>
+        </form>
+
+        {searchError && (
+          <div className="search-error-alert">
+            <AlertCircle size={18} />
+            <span>{searchError}</span>
+          </div>
+        )}
+      </div>
+
+      {/* INFORMACIÓN DEL APODERADO */}
+      {guardian && (
+        <div className="guardian-profile-card">
+          <div className="guardian-profile-header">
+            <div className="guardian-avatar-badge">
+              <User size={24} />
+            </div>
+            <div className="guardian-titles">
+              <h3 className="guardian-name">{guardian.fullName}</h3>
+              <span className="guardian-rut-pill">RUT {guardian.rut}</span>
+            </div>
+          </div>
+
+          <div className="guardian-details-grid">
+            <div className="detail-item">
+              <Home size={15} />
+              <div>
+                <span className="label">Dirección</span>
+                <span className="value">{guardian.address || 'Quilpué'}</span>
               </div>
             </div>
+            <div className="detail-item">
+              <MapPin size={15} />
+              <div>
+                <span className="label">Sector Comunal</span>
+                <span className="value">{guardian.sector || 'CENTRO'}</span>
+              </div>
+            </div>
+            <div className="detail-item">
+              <Phone size={15} />
+              <div>
+                <span className="label">Teléfono</span>
+                <span className="value">{guardian.phone || 'No registrado'}</span>
+              </div>
+            </div>
+            <div className="detail-item">
+              <Mail size={15} />
+              <div>
+                <span className="label">Correo Electrónico</span>
+                <span className="value">{guardian.email || 'No registrado'}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
-            <div className="ficha-divider" />
+      {/* LISTADO DE BENEFICIOS ASIGNADOS */}
+      {guardian && (
+        <div className="benefits-section-card">
+          <div className="benefits-section-header">
+            <div>
+              <h3>Beneficios Escolares Asignados</h3>
+              <p className="subtitle">
+                Marca los beneficios a entregar y adjunta la fotografía del acta física firmada.
+              </p>
+            </div>
+            {pendingBenefits.length > 1 && (
+              <button type="button" className="btn btn-sm btn-outline" onClick={toggleTodos}>
+                {checkedBenefitIds.size === pendingBenefits.length ? 'Deseleccionar todos' : 'Seleccionar todos'}
+              </button>
+            )}
+          </div>
 
-            {/* SECCIÓN ALUMNOS CON CHECKBOXES DE ENTREGA */}
-            <div className="ficha-section">
-              <div className="section-header-flex">
-                <h3 className="section-title">
-                  {benefits.length === 1
-                    ? 'Beneficio Escolar'
-                    : `Beneficios Asociados (${benefits.length})`}
-                </h3>
-                {pendingBenefits.length > 1 && (
+          <div className="benefits-list">
+            {benefits.map((b) => {
+              const isDelivered = b.status === 'DELIVERED';
+              const isChecked = checkedBenefitIds.has(b.benefitId);
+
+              return (
+                <div
+                  key={b.benefitId}
+                  className={`benefit-row-card ${isDelivered ? 'delivered' : 'pending'}`}
+                  onClick={() => !isDelivered && toggleBenefitCheckbox(b.benefitId)}
+                >
+                  <div className="benefit-check-column">
+                    {isDelivered ? (
+                      <span className="badge-delivered-check" title="Entregado">
+                        <Check size={16} />
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        className={`checkbox-toggle-btn ${isChecked ? 'checked' : ''}`}
+                        aria-label="Seleccionar beneficio"
+                      >
+                        {isChecked ? <CheckSquare size={20} /> : <Square size={20} />}
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="benefit-info-column">
+                    <div className="student-name">
+                      <GraduationCap size={16} />
+                      <span>{b.student.fullName}</span>
+                      <small className="student-rut">({b.student.rut})</small>
+                    </div>
+                    <div className="benefit-meta-line">
+                      <span className="benefit-badge-name">{b.benefitName}</span>
+                      <span className="benefit-school">{b.student.establishment}</span>
+                    </div>
+                  </div>
+
+                  <div className="benefit-status-column">
+                    {isDelivered ? (
+                      <div className="delivered-tag">
+                        <CheckCircle2 size={15} />
+                        <span>Entregado {b.deliveredAt ? `(${b.deliveredAt})` : ''}</span>
+                      </div>
+                    ) : (
+                      <span className="pending-tag">Pendiente de entrega</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* ZONA DE EVIDENCIA Y REGISTRO DE ENTREGA */}
+          {pendingBenefits.length > 0 && (
+            <div className="delivery-action-panel">
+              <div className="action-panel-info">
+                <h4>Respaldo de Entrega con Acta Física</h4>
+                <p>
+                  El funcionario debe entregar el beneficio, solicitar la firma física en el acta y fotografiarla.
+                </p>
+              </div>
+
+              <div className="photo-status-box">
+                {fotoDataUrl ? (
+                  <div className="photo-preview-thumbnail-row">
+                    <img src={fotoDataUrl} alt="Acta capturada" className="acta-thumbnail" />
+                    <div className="thumbnail-meta">
+                      <span className="badge-success-photo">
+                        <Check size={14} /> Acta fotografiada y comprimida
+                      </span>
+                      {deliveryMeta?.location?.latitude && (
+                        <small className="geo-meta">
+                          <MapPin size={12} /> Coordenadas: {deliveryMeta.location.latitude.toFixed(4)},{' '}
+                          {deliveryMeta.location.longitude.toFixed(4)}
+                        </small>
+                      )}
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-link"
+                        onClick={() => setIsCameraOpen(true)}
+                      >
+                        Cambiar fotografía
+                      </button>
+                    </div>
+                  </div>
+                ) : (
                   <button
                     type="button"
-                    className="select-all-btn"
-                    onClick={toggleTodos}
+                    className="btn btn-yellow btn-capture-acta"
+                    onClick={() => setIsCameraOpen(true)}
                   >
-                    {checkedBenefitIds.size === pendingBenefits.length
-                      ? 'Desmarcar todos'
-                      : 'Seleccionar todos pendientes'}
+                    <Camera size={18} />
+                    <span>Tomar o Subir Foto del Acta Firmada</span>
                   </button>
                 )}
               </div>
 
-              <div className="alumnos-list">
-                {benefits.map((b) => {
-                  const isChecked = checkedBenefitIds.has(b.benefitId);
-                  const isDelivered = b.status === 'DELIVERED';
-
-                  return (
-                    <div
-                      key={b.benefitId}
-                      className={`alumno-card-item ${isChecked ? 'selected' : ''} ${
-                        isDelivered ? 'delivered' : ''
-                      }`}
-                    >
-                      {/* Checkbox de selección */}
-                      <div className="alumno-check-col">
-                        {isDelivered ? (
-                          <span className="badge-delivered-check" title="Ya entregado">
-                            ✓
-                          </span>
-                        ) : (
-                          <label className="custom-checkbox-container">
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={() => toggleBenefitCheckbox(b.benefitId)}
-                            />
-                            <span className="checkbox-checkmark" />
-                          </label>
-                        )}
-                      </div>
-
-                      {/* Datos del Alumno y Beneficio */}
-                      <div className="alumno-details-col">
-                        <div className="alumno-name-row">
-                          <strong>{b.student?.fullName || 'Alumno'}</strong>
-                          <span className="alumno-rut-badge">RUT {b.student?.rut}</span>
-                        </div>
-                        <div className="alumno-meta-row">
-                          <span>🏫 {b.student?.establishment || 'Colegio Quilpué'}</span>
-                          <span>📚 {b.student?.educationalLevel || 'Nivel Escolar'}</span>
-                        </div>
-                        <div className="alumno-benefit-tag">
-                          🎁 {b.benefitName || 'Set Escolar Municipal 2026'}
-                        </div>
-
-                        {isDelivered && (
-                          <div className="delivery-status-info">
-                            <span className="delivered-badge">✓ Beneficio Entregado</span>
-                            {b.deliveredAt && (
-                              <small>Fecha: {b.deliveredAt}</small>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Contador de entregas */}
-              <div className="partial-delivery-counter">
-                <span>Beneficios marcados para retiro actual:</span>
-                <strong>
-                  {checkedBenefitIds.size} de {pendingBenefits.length} pendientes
-                </strong>
-              </div>
-            </div>
-
-            {/* SECCIÓN FOTOGRAFÍA / CÁMARA */}
-            <div className="camera-upload-section">
-              {fotoDataUrl ? (
-                <div className="photo-attached-preview">
-                  <img src={fotoDataUrl} alt="Acta firmada" className="attached-img" />
-                  <div className="attached-info">
-                    <span className="attached-success-text">✓ Fotografía del acta adjunta</span>
-                    <button
-                      type="button"
-                      className="btn btn-outline btn-sm"
-                      onClick={() => setIsCameraOpen(true)}
-                    >
-                      📷 Repetir Fotografía
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div
-                  className="camera-dropzone"
-                  onClick={() => setIsCameraOpen(true)}
-                  role="button"
-                  tabIndex={0}
+              <div className="action-submit-row">
+                <button
+                  type="button"
+                  className="btn btn-success btn-lg btn-confirm-delivery"
+                  onClick={handleRegistrarEntrega}
+                  disabled={loading || checkedBenefitIds.size === 0 || !fotoBlob}
                 >
-                  <div className="camera-icon-circle">
-                    <svg viewBox="0 0 24 24" className="camera-svg-icon" fill="none" stroke="currentColor">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth="1.8"
-                        d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"
-                      />
-                      <circle cx="12" cy="13" r="4" strokeWidth="1.8" />
-                    </svg>
-                  </div>
-                  <span className="camera-dropzone-text">Capturar Fotografía Del Acta</span>
-                  <small className="camera-dropzone-sub">
-                    Fotografíe la firma en el acta física para respaldo y trazabilidad
-                  </small>
-                </div>
-              )}
+                  <Save size={18} />
+                  <span>
+                    {loading
+                      ? 'Registrando entrega…'
+                      : `Confirmar Entrega (${checkedBenefitIds.size} seleccionados)`}
+                  </span>
+                </button>
+              </div>
             </div>
-
-            {/* BOTÓN REGISTRAR ENTREGA */}
-            <button
-              type="button"
-              className="btn btn-yellow btn-lg full-width"
-              onClick={handleRegistrarEntrega}
-              disabled={loading || checkedBenefitIds.size === 0}
-            >
-              {loading ? 'Registrando Entrega en Servidor…' : 'Registrar Entrega'}
-            </button>
-          </div>
+          )}
         </div>
       )}
 
@@ -451,10 +473,8 @@ export default function TerrenoView() {
       {/* MODAL DE ÉXITO */}
       <SuccessModal
         isOpen={showSuccess}
-        onClose={handleCerrarExito}
-        apoderado={entregaExitosaData?.apoderado}
-        beneficiariosEntregados={entregaExitosaData?.beneficiarios}
-        fecha={entregaExitosaData?.fecha}
+        onClose={() => setShowSuccess(false)}
+        data={entregaExitosaData}
       />
     </div>
   );

@@ -1,158 +1,122 @@
 import { useState } from 'react';
+import { Shield, User, Lock, LogIn, AlertCircle, Sparkles } from 'lucide-react';
 import { apiService } from '../services/apiService';
 
 export default function LoginPage({ onLogin }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  async function executeLogin(userToAuth, passToAuth) {
+  async function handleSubmit(e) {
+    e.preventDefault();
     setError('');
+
+    if (!username.trim() || !password) {
+      setError('Por favor ingresa usuario y contraseña.');
+      return;
+    }
+
     setLoading(true);
     try {
-      const data = await apiService.login(userToAuth, passToAuth);
+      const data = await apiService.login(username.trim(), password);
       onLogin(data.user);
     } catch (err) {
-      setError(err.message || 'Usuario o contraseña incorrectos.');
+      setError(err.message || 'Credenciales incorrectas o servidor no disponible.');
     } finally {
       setLoading(false);
     }
   }
 
-  function handleSubmit(e) {
-    e.preventDefault();
-    if (!username.trim()) {
-      setError('Por favor ingrese su usuario o correo institucional');
-      return;
-    }
-    if (!password) {
-      setError('Por favor ingrese su contraseña');
-      return;
-    }
-    executeLogin(username.trim(), password);
-  }
-
-  function handleQuickLogin(role) {
-    if (role === 'admin') {
+  function handleQuickFill(userType) {
+    if (userType === 'admin') {
       setUsername('admin');
       setPassword('Admin123!');
-      executeLogin('admin', 'Admin123!');
     } else {
       setUsername('terreno');
       setPassword('Terreno123!');
-      executeLogin('terreno', 'Terreno123!');
     }
+    setError('');
   }
 
   return (
-    <div className="login-wrapper">
-      {/* Columna Izquierda (Desktop) con Ilustración de Quilpué */}
-      <div className="login-side-illustration">
-        <div className="illustration-container">
-          <img
-            src={`${import.meta.env.BASE_URL}assets/quilpue-iglesia.png`}
-            alt="Ilustración Quilpué"
-            className="illustration-img"
-            onError={(e) => {
-              e.currentTarget.style.display = 'none';
-            }}
-          />
-          <div className="illustration-text">
-            <h2>Municipalidad de Quilpué</h2>
-            <p>Plataforma de Gestión y Trazabilidad de Beneficios Sociales</p>
+    <div className="login-page-container">
+      <div className="login-card">
+        <div className="login-header">
+          <div className="login-shield-badge">
+            <Shield size={36} />
           </div>
+          <h1 className="login-title">Plataforma de Beneficios</h1>
+          <p className="login-subtitle">Dirección de Desarrollo Comunitario (DIDECO) — Quilpué</p>
         </div>
-      </div>
 
-      {/* Columna Derecha / Pantalla Móvil Completa */}
-      <div className="login-form-side">
-        <div className="login-card-content">
-          {/* Logo y Encabezado Institucional */}
-          <div className="login-brand-header">
-            <img
-              src={`${import.meta.env.BASE_URL}assets/logo-white-vert.png`}
-              alt="Municipalidad de Quilpué"
-              className="login-brand-logo"
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-              }}
-            />
-            <div className="brand-logo-text">
-              <span className="brand-title">QUILPUÉ</span>
-              <span className="brand-subtitle">MUNICIPALIDAD</span>
-            </div>
-            <div className="brand-dept-tag">Departamento Social</div>
+        {error && (
+          <div className="login-error-alert">
+            <AlertCircle size={18} />
+            <span>{error}</span>
           </div>
+        )}
 
-          {/* Formulario conectado directamente al Backend */}
-          <form className="login-form" onSubmit={handleSubmit}>
-            {error && <div className="login-error-msg">⚠️ {error}</div>}
-
-            <div className="login-input-group">
-              <label htmlFor="login-email">Usuario o Correo Institucional</label>
+        <form onSubmit={handleSubmit} className="login-form">
+          <div className="form-group">
+            <label htmlFor="username">Usuario o Correo Institucional</label>
+            <div className="input-with-icon">
+              <User size={18} className="input-icon" />
               <input
-                id="login-email"
+                id="username"
                 type="text"
-                placeholder="Ej: admin o terreno"
+                autoComplete="username"
+                placeholder="Ej. admin o terreno"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                autoComplete="username"
                 disabled={loading}
               />
-            </div>
-
-            <div className="login-input-group">
-              <label htmlFor="login-pass">Contraseña</label>
-              <input
-                id="login-pass"
-                type="password"
-                placeholder="Ej: Admin123! o Terreno123!"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="current-password"
-                disabled={loading}
-              />
-              <span className="forgot-link" style={{ fontSize: '0.8rem', color: '#64748b' }}>
-                Credenciales oficiales verificadas por el backend
-              </span>
-            </div>
-
-            <button
-              type="submit"
-              className="btn btn-yellow login-submit-btn"
-              disabled={loading}
-            >
-              {loading ? 'Validando credenciales…' : 'Ingresar'}
-            </button>
-          </form>
-
-          {/* Botones de Acceso Rápido con credenciales oficiales */}
-          <div className="quick-access-section">
-            <span className="quick-access-title">Credenciales Oficiales del Backend</span>
-            <div className="quick-btn-grid">
-              <button
-                type="button"
-                className="quick-role-btn terreno"
-                onClick={() => handleQuickLogin('terreno')}
-                disabled={loading}
-              >
-                📱 Operador Terreno (<code>terreno</code> / <code>Terreno123!</code>)
-              </button>
-              <button
-                type="button"
-                className="quick-role-btn admin"
-                onClick={() => handleQuickLogin('admin')}
-                disabled={loading}
-              >
-                📊 Administrador (<code>admin</code> / <code>Admin123!</code>)
-              </button>
             </div>
           </div>
-        </div>
 
-        {/* Silueta urbana inferior en vista móvil */}
-        <div className="login-bottom-skyline" />
+          <div className="form-group">
+            <label htmlFor="password">Contraseña</label>
+            <div className="input-with-icon">
+              <Lock size={18} className="input-icon" />
+              <input
+                id="password"
+                type="password"
+                autoComplete="current-password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={loading}
+              />
+            </div>
+          </div>
+
+          <button type="submit" className="btn btn-primary btn-block btn-lg" disabled={loading}>
+            <LogIn size={18} />
+            <span>{loading ? 'Iniciando sesión…' : 'Ingresar al Sistema'}</span>
+          </button>
+        </form>
+
+        <div className="login-demo-helper">
+          <span className="helper-label">Acceso rápido para pruebas:</span>
+          <div className="quick-access-buttons">
+            <button
+              type="button"
+              className="quick-btn admin"
+              onClick={() => handleQuickFill('admin')}
+              disabled={loading}
+            >
+              Administrador
+            </button>
+            <button
+              type="button"
+              className="quick-btn terreno"
+              onClick={() => handleQuickFill('terreno')}
+              disabled={loading}
+            >
+              Operador Terreno
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
