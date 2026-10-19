@@ -1,48 +1,38 @@
 export default function BarChart({
   items = [
-    { label: '09:00 - 11:00', value: 65, color: '#3b82f6' },
-    { label: '11:00 - 13:00', value: 45, color: '#a855f7' },
-    { label: '13:00 - 15:00', value: 82, color: '#f97316' },
-    { label: '15:00 - 17:00', value: 30, color: '#fbbf24' },
+    { label: 'Belloto Norte', value: 320, color: '#2563eb' },
+    { label: 'Belloto Sur', value: 410, color: '#7c3aed' },
+    { label: 'Quilpué Centro', value: 560, color: '#ea580c' },
+    { label: 'Canal Chacao', value: 230, color: '#eab308' },
+    { label: 'Pompeya', value: 180, color: '#06b6d4' },
   ],
 }) {
-  const maxValue = Math.max(...items.map((i) => i.value), 100);
+  const maxValue = Math.max(...items.map((i) => i.value), 1);
 
   return (
-    <div className="bar-chart-container">
-      <div className="bar-chart-plot">
-        {/* Y Axis Grid lines */}
-        <div className="chart-grid-lines">
-          {[100, 75, 50, 25, 0].map((val) => (
-            <div key={val} className="grid-line-row">
-              <span className="grid-label">{Math.round((val / 100) * maxValue)}</span>
-              <div className="grid-line" />
+    <div className="adaptive-bars-list">
+      {items.map((item, idx) => {
+        const pct = Math.round((item.value / maxValue) * 100);
+        return (
+          <div key={idx} className="adaptive-bar-item">
+            <div className="adaptive-bar-header">
+              <span className="adaptive-bar-title">{item.label}</span>
+              <span className="adaptive-bar-count">
+                <strong>{item.value.toLocaleString('es-CL')}</strong> entregas
+              </span>
             </div>
-          ))}
-        </div>
-
-        {/* Bars */}
-        <div className="bars-flex">
-          {items.map((item, idx) => {
-            const heightPct = Math.round((item.value / maxValue) * 100);
-            return (
-              <div key={idx} className="bar-column">
-                <div className="bar-value-tooltip">{item.value}</div>
-                <div className="bar-track-vertical">
-                  <div
-                    className="bar-fill-vertical"
-                    style={{
-                      height: `${heightPct}%`,
-                      backgroundColor: item.color,
-                    }}
-                  />
-                </div>
-                <span className="bar-x-label">{item.label}</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+            <div className="adaptive-bar-track">
+              <div
+                className="adaptive-bar-fill"
+                style={{
+                  width: `${pct}%`,
+                  backgroundColor: item.color || '#2563eb',
+                }}
+              />
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

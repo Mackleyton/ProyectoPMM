@@ -2412,3 +2412,236 @@ body {
   display: flex;
   flex-direction: column;
 }
+
+/* ==========================================================================
+   OPTIMIZACIÓN RESPONSIVE PWA Y MÓVIL (DASHBOARD & GRÁFICOS)
+   ========================================================================== */
+
+/* Barras Adaptativas Horizontales para Distribución Territorial */
+.adaptive-bars-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+.adaptive-bar-item {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+}
+.adaptive-bar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.85rem;
+}
+.adaptive-bar-title {
+  font-weight: 600;
+  color: var(--color-text-main);
+}
+.adaptive-bar-count {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+.adaptive-bar-count strong {
+  color: var(--color-primary-dark);
+}
+.adaptive-bar-track {
+  width: 100%;
+  height: 10px;
+  background-color: #f1f5f9;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.adaptive-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ==========================================================================
+   REGLAS PARA SIMULADOR MÓVIL Y DISPOSITIVOS REALES (PWA)
+   ========================================================================== */
+.smartphone-frame,
+.phone-screen-content {
+  overflow-x: hidden !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+/* Reglas aplicadas al simulador de smartphone en PC */
+.smartphone-frame .admin-dashboard-container {
+  gap: 16px !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow-x: hidden !important;
+}
+.smartphone-frame .dashboard-header-row {
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 12px !important;
+}
+.smartphone-frame .dashboard-main-title {
+  font-size: 1.35rem !important;
+}
+.smartphone-frame .dashboard-subtitle {
+  font-size: 0.82rem !important;
+}
+.smartphone-frame .dashboard-actions {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 8px !important;
+  width: 100% !important;
+}
+.smartphone-frame .dashboard-actions button {
+  width: 100% !important;
+  justify-content: center !important;
+}
+
+.smartphone-frame .kpi-cards-grid {
+  grid-template-columns: repeat(2, 1fr) !important;
+  gap: 10px !important;
+  width: 100% !important;
+}
+.smartphone-frame .kpi-stat-card {
+  padding: 12px 10px !important;
+  border-top-width: 4px !important;
+  border-radius: var(--radius-md) !important;
+  min-width: 0 !important;
+}
+.smartphone-frame .kpi-card-label {
+  font-size: 0.74rem !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+.smartphone-frame .kpi-card-value {
+  font-size: 1.55rem !important;
+  margin: 4px 0 !important;
+}
+.smartphone-frame .kpi-card-desc {
+  font-size: 0.68rem !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+.smartphone-frame .charts-grid-two {
+  grid-template-columns: 1fr !important;
+  gap: 14px !important;
+  width: 100% !important;
+}
+.smartphone-frame .chart-panel-card {
+  padding: 14px 12px !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+.smartphone-frame .donut-chart-container {
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 14px !important;
+}
+.smartphone-frame .donut-svg-wrap {
+  width: 140px !important;
+  height: 140px !important;
+}
+.smartphone-frame .donut-legend {
+  width: 100% !important;
+  gap: 8px !important;
+}
+
+/* Reglas idénticas para teléfonos móviles reales vía PWA */
+@media (max-width: 768px) {
+  body {
+    overflow-x: hidden;
+  }
+  .standard-view-wrapper {
+    padding: 12px 10px 32px !important;
+  }
+  .admin-dashboard-container {
+    gap: 16px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow-x: hidden !important;
+  }
+  .dashboard-header-row {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 12px !important;
+  }
+  .dashboard-main-title {
+    font-size: 1.35rem !important;
+  }
+  .dashboard-subtitle {
+    font-size: 0.82rem !important;
+  }
+  .dashboard-actions {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+    width: 100% !important;
+  }
+  .dashboard-actions button {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+
+  .kpi-cards-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 10px !important;
+    width: 100% !important;
+  }
+  .kpi-stat-card {
+    padding: 12px 10px !important;
+    border-top-width: 4px !important;
+    border-radius: var(--radius-md) !important;
+    min-width: 0 !important;
+  }
+  .kpi-card-label {
+    font-size: 0.74rem !important;
+  }
+  .kpi-card-value {
+    font-size: 1.55rem !important;
+    margin: 4px 0 !important;
+  }
+  .kpi-card-desc {
+    font-size: 0.68rem !important;
+  }
+
+  .charts-grid-two {
+    grid-template-columns: 1fr !important;
+    gap: 14px !important;
+    width: 100% !important;
+  }
+  .chart-panel-card {
+    padding: 14px 12px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .donut-chart-container {
+    flex-direction: column !important;
+    align-items: center !important;
+    gap: 14px !important;
+  }
+  .donut-svg-wrap {
+    width: 140px !important;
+    height: 140px !important;
+  }
+  .donut-legend {
+    width: 100% !important;
+    gap: 8px !important;
+  }
+
+  /* Ajustes para tabla de beneficiarios en móvil */
+  .admin-table th, .admin-table td {
+    padding: 10px 12px !important;
+    font-size: 0.82rem !important;
+  }
+  .search-box-pill {
+    width: 100% !important;
+  }
+  .search-box-pill input {
+    width: 100% !important;
+  }
+}
