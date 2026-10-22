@@ -12,8 +12,8 @@ export default function UploadPage({ onUploadFinished }) {
 
   function handleFile(f) {
     if (!f) return;
-    if (!/\.xlsx?$/i.test(f.name)) {
-      setError('Solo se aceptan archivos de planilla Excel (.xlsx o .xls)');
+    if (!/\.(xlsx?|csv|tsv)$/i.test(f.name)) {
+      setError('Solo se aceptan archivos de planilla Excel (.xlsx, .xls) o CSV (.csv)');
       return;
     }
     setFile(f);
@@ -51,7 +51,7 @@ export default function UploadPage({ onUploadFinished }) {
         <div>
           <h2>Carga Masiva de Planilla (MCGD)</h2>
           <p className="desc">
-            Sube un archivo Excel estandarizado con el padrón comunal de postulantes.
+            Sube un archivo Excel (.xlsx/.xls) o CSV (.csv) con el padrón comunal de postulantes.
             Las entregas ya registradas y sus actas se conservarán íntegramente.
           </p>
         </div>
@@ -74,22 +74,20 @@ export default function UploadPage({ onUploadFinished }) {
         <input
           ref={inputRef}
           type="file"
-          accept=".xlsx,.xls"
+          accept=".xlsx,.xls,.csv,.tsv"
           style={{ display: 'none' }}
           onChange={(e) => handleFile(e.target.files[0])}
           onClick={(e) => e.stopPropagation()}
         />
         <div className="drop-icon">{file ? '📊' : '📁'}</div>
         <p className="drop-text">
-          {file ? 'Haz clic para cambiar el archivo' : 'Haz clic o arrastra tu archivo Excel aquí'}
+          {file ? 'Haz clic para cambiar el archivo' : 'Haz clic o arrastra tu archivo Excel o CSV aquí'}
         </p>
         {file && <p className="drop-file-name">Archivo seleccionado: <strong>{file.name}</strong></p>}
       </div>
 
       <div className="warning-box">
-        ℹ️ <strong>Estructura requerida:</strong> La planilla debe contener las columnas oficiales:
-        <code>Rut_Apoderado</code>, <code>Nombre_Apoderado</code>, <code>Rut_Alumno</code>,
-        <code>Nombre_Alumno</code>, <code>Establecimiento</code>, <code>Estado</code>.
+        ℹ️ <strong>Columnas reconocidas:</strong> <code>Rut_Apoderado</code>, <code>Nombre_Apoderado</code>, <code>Rut_Alumno</code>, <code>Nombre_Alumno</code>, <code>Sector</code>, <code>Nivel_Educacional</code>, <code>Estado</code> (se consideran para stock los de estado <strong>APROBADA</strong>).
       </div>
 
       {error && <div className="msg-error">⚠️ {error}</div>}
