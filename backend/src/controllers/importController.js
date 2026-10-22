@@ -9,7 +9,7 @@ async function importExcel(req, res) {
   const ipAddress = req.ip || req.connection.remoteAddress || "127.0.0.1";
   try {
     if (!req.file) {
-      return res.status(400).json({ message: "Debes adjuntar un archivo de planilla Excel (.xlsx o .xls)." });
+      return res.status(400).json({ message: "Debes adjuntar un archivo de planilla (.xlsx, .xls o .csv)." });
     }
 
     // Modo de importación: 'replace' (reemplazo total) o 'update' (actualización/adición)
@@ -20,12 +20,12 @@ async function importExcel(req, res) {
 
     if (results.length === 0) {
       return res.status(400).json({
-        message: "No se pudieron procesar registros válidos del archivo Excel.",
+        message: "No se pudieron procesar registros válidos del archivo Excel o CSV.",
         errors,
       });
     }
 
-    // 1. Si es modo reemplazo en memoria, limpiar todo
+    // Si es modo reemplazo en memoria, limpiar todo
     if (isReplace) {
       memoryStore.guardians.clear();
       memoryStore.students.clear();
@@ -71,7 +71,7 @@ async function importExcel(req, res) {
       });
     });
 
-    // 2. Sincronizar en PostgreSQL si está disponible
+    // Sincronizar en PostgreSQL si está disponible
     if (usePostgres) {
       const client = await pool.connect();
       try {
@@ -95,42 +95,30 @@ async function importExcel(req, res) {
 
     // Persistir copia en backend/data para respaldos
     try {
-      const destFile = path.join(__dirname, "..", "..", "data", "formulario_postulantes.xlsx");
+      const destDir = path.join(__dirname, "..", "..", "data");
+      if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+      const destFile = path.join(destDir, "formulario_postulantes.xlsx");
       fs.writeFileSync(destFile, req.file.buffer);
     } catch (saveErr) {
       console.warn("[IMPORT] No se pudo guardar copia local de respaldo:", saveErr.message);
     }
 
-    // Registro de Auditoría
-    const auditAction = isReplace ? "IMPORT_EXCEL_REPLACE" : "IMPORT_EXCEL_UPDATE";
     await recordAuditLog({
-      userId: req.user?.id,
-      username: req.user?.username || "admin",
-      action: auditAction,
-      entityType: "EXCEL_IMPORT",
-      details: {
-        fileName: req.file.originalname,
-        mode: isReplace ? "REEMPLAZO_TOTAL" : "ACTUALIZACION_INCREMENTAL",
-        totalRows,
-        importedRows: results.length,
-        rejectedRows: errors.length,
-      },
+      action: isReplace ? "IMPORT_REPLACE" : "IMPORT_UPDATE",
+      performedBy: req.user?.username || "admin",
+      details: `Importación masiva: ${results.length} beneficiarios procesados desde ${req.file.originalname}`,
       ipAddress,
     });
 
     return res.json({
-      ok: true,
-      mode: isReplace ? "REEMPLAZO_TOTAL" : "ACTUALIZACION_INCREMENTAL",
-      message: isReplace
-        ? `Nómina reemplazada exitosamente. Se cargaron ${results.length} beneficiarios nuevos.`
-        : `Nómina actualizada exitosamente. Se procesaron ${results.length} beneficiarios conservando entregas previas.`,
-      batchId: `batch-${Date.now()}`,
+      message: "Planilla procesada e importada correctamente.",
       totalRows,
       importedRows: results.length,
       rejectedRows: errors.length,
       errors: errors.slice(0, 10),
     });
   } catch (error) {
+    console.error("[IMPORT] Error inesperado:", error);
     return res.status(500).json({ message: "Error al importar planilla.", error: error.message });
   }
 }
@@ -176,6 +164,53 @@ async function resetDatabase(req, res) {
       message: "Base de datos y actas físicas reseteadas exitosamente.",
     });
   } catch (error) {
+    console.error("[RESET_DB] Error:", error);
+    return res.status(500).json({ message: "Error al reiniciar la base de datos.", error: error.message });
+  }
+}
+
+async function resetDatabase(req, res) {
+  const ipAddress = req.ip || req.connection.remoteAddress || "127.0.0.1";
+  try {
+    const uploadsDir = path.join(__dirname, "..", "..", "uploads", "actas");
+    if (fs.existsSync(uploadsDir)) {
+      const files = fs.readdirSync(uploadsDir);
+      for (const f of files) {
+        const fullPath = path.join(uploadsDir, f);
+        if (fs.statSync(fullPath).isFile()) {
+          fs.unlinkSync(fullPath);
+        }
+      }
+    }
+
+    if (usePostgres) {
+      const initSqlPath = path.join(__dirname, "..", "..", "database", "init.sql");
+      if (fs.existsSync(initSqlPath)) {
+        const sql = fs.readFileSync(initSqlPath, "utf-8");
+        await pool.query(sql);
+      }
+    }
+
+    memoryStore.guardians.clear();
+    memoryStore.students.clear();
+    memoryStore.benefits.clear();
+    memoryStore.deliveries.clear();
+    memoryStore.evidences.clear();
+
+    await recordAuditLog({
+      userId: req.user?.id,
+      username: req.user?.username || "admin",
+      action: "DATABASE_RESET",
+      details: { resetAt: new Date().toISOString() },
+      ipAddress,
+    });
+
+    return res.json({
+      ok: true,
+      message: "Base de datos y actas físicas reseteadas exitosamente.",
+    });
+  } catch (error) {
+    console.error("[RESET_DB] Error:", error);
     return res.status(500).json({ message: "Error al reiniciar la base de datos.", error: error.message });
   }
 }
