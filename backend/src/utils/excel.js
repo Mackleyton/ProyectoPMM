@@ -48,7 +48,7 @@ function normalizeHeaderName(key) {
 function getRowValue(rowMap, ...potentialKeys) {
   for (const k of potentialKeys) {
     const norm = normalizeHeaderName(k);
-    if (rowMap[norm] !== undefined && rowMap[norm] !== "") {
+    if (rowMap[norm] !== undefined && rowMap[norm] !== null && String(rowMap[norm]).trim() !== "") {
       return rowMap[norm];
     }
   }
@@ -58,28 +58,88 @@ function getRowValue(rowMap, ...potentialKeys) {
 function parseExcelBeneficiaries(bufferOrPath) {
   let workbook;
   if (Buffer.isBuffer(bufferOrPath)) {
-    workbook = xlsx.read(bufferOrPath, { type: "buffer" });
+    try {
+      workbook = xlsx.read(bufferOrPath, { type: "buffer", cellDates: true });
+    } catch {
+      const text = bufferOrPath.toString("utf8");
+      workbook = xlsx.read(text, { type: "string", cellDates: true });
+    }
   } else {
-    workbook = xlsx.readFile(bufferOrPath);
+    workbook = xlsx.readFile(bufferOrPath, { cellDates: true });
   }
 
-  // Tomar siempre la primera hoja disponible
-  const sheetName = workbook.SheetNames[0];
-  const firstSheet = workbook.Sheets[sheetName];
-  const rawRows = xlsx.utils.sheet_to_json(firstSheet, { defval: "" });
+  // Buscar la primera hoja con contenido
+  let firstSheet = null;
+  for (const name of workbook.SheetNames) {
+    const s = workbook.Sheets[name];
+    if (s && s["!ref"]) {
+      firstSheet = s;
+      break;
+    }
+  }
+  if (!firstSheet && workbook.SheetNames.length > 0) {
+    firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+  }
+
+  if (!firstSheet) {
+    return { results: [], errors: [{ fila: 0, error: "La planilla no contiene hojas legibles" }], totalRows: 0 };
+  }
+
+  // Convertir a matriz 2D para detectar dinámicamente la fila de cabecera
+  const matrix = xlsx.utils.sheet_to_json(firstSheet, { header: 1, defval: "" });
+  let headerRowIdx = -1;
+  const maxScan = Math.min(25, matrix.length);
+
+  for (let i = 0; i < maxScan; i++) {
+    const row = matrix[i];
+    if (!Array.isArray(row)) continue;
+    const rowStr = row.map((cell) => normalizeHeaderName(cell)).join(" ");
+    if (
+      (rowStr.includes("rut") || rowStr.includes("run")) &&
+      (rowStr.includes("apoderado") || rowStr.includes("alumno") || rowStr.includes("estudiante") || rowStr.includes("nombre"))
+    ) {
+      headerRowIdx = i;
+      break;
+    }
+  }
+
+  let rawRows = [];
+  if (headerRowIdx !== -1) {
+    const headers = matrix[headerRowIdx].map((h) => String(h || "").trim());
+    for (let r = headerRowIdx + 1; r < matrix.length; r++) {
+      const rowArr = matrix[r];
+      if (!Array.isArray(rowArr) || rowArr.length === 0) continue;
+      const rowObj = {};
+      let hasData = false;
+      headers.forEach((h, colIdx) => {
+        if (!h) return;
+        const val = rowArr[colIdx] !== undefined ? rowArr[colIdx] : "";
+        rowObj[h] = val;
+        if (String(val).trim()) hasData = true;
+      });
+      if (hasData) rawRows.push(rowObj);
+    }
+  } else {
+    rawRows = xlsx.utils.sheet_to_json(firstSheet, { defval: "" });
+  }
 
   const results = [];
   const errors = [];
 
   rawRows.forEach((row, idx) => {
-    // Mapear todas las columnas normalizadas
     const rowMap = {};
     for (const [key, value] of Object.entries(row)) {
       rowMap[normalizeHeaderName(key)] = value;
     }
 
-    const rawApoderado = getRowValue(rowMap, "rutapoderado", "rut_apoderado", "rut apoderado", "apoderadorut");
-    const rawAlumno = getRowValue(rowMap, "rutalumno", "rut_alumno", "rut alumno", "alumnorut");
+    const rawApoderado = getRowValue(
+      rowMap,
+      "rutapoderado", "rut_apoderado", "rut apoderado", "runapoderado", "run_apoderado", "apoderadorut"
+    );
+    const rawAlumno = getRowValue(
+      rowMap,
+      "rutalumno", "rut_alumno", "rut alumno", "runalumno", "run_alumno", "rutestudiante", "rut_estudiante", "alumnorut"
+    );
 
     if (!rawApoderado || !rawAlumno) {
       errors.push({ fila: idx + 2, error: "Faltan RUT de apoderado o RUT de alumno" });
@@ -128,7 +188,7 @@ function parseExcelBeneficiaries(bufferOrPath) {
 
     const isDelivered = !!fechaEntrega && fechaEntrega !== "-";
 
-    // Determinar tipo de beneficio según el nivel educacional
+    // Tipo de beneficio canónico según nivel educacional
     let benefitName = "Set Escolar 2026 - BÁSICA";
     const lvlLower = sLevel.toLowerCase();
     if (lvlLower.includes("pre") || lvlLower.includes("kinder") || lvlLower.includes("kínder")) {
@@ -188,4 +248,6 @@ module.exports = {
   parseExcelBeneficiaries,
   parseExcelDate,
   parseExcelTime,
+  normalizeHeaderName,
+  getRowValue,
 };
