@@ -1,32 +1,35 @@
 const { pool, usePostgres, memoryStore } = require("../config/db");
 
-// Clasificación canónica de niveles educativos
+// Clasificación canónica de los 5 niveles oficiales
 function categorizeLevel(lvl) {
   const s = String(lvl || "").toLowerCase();
   if (s.includes("pre") || s.includes("kinder") || s.includes("kínder")) {
-    return "Pre-Básica (Pre-Kinder y Kinder)";
+    return "PRE BÁSICA";
+  }
+  if (s.includes("superior") || s.includes("universitaria") || s.includes("instituto") || s.includes("cft")) {
+    return "SUPERIOR";
   }
   if (s.includes("media") || s.includes("secundaria")) {
-    return "Media (1° a 4° Medio)";
+    return "MEDIA";
   }
   if (s.includes("segundo") || s.includes("5") || s.includes("6") || s.includes("7") || s.includes("8")) {
-    return "Básica Segundo Ciclo (5° a 8° Básico)";
+    return "BÁSICA SEGUNDO CICLO (5° A 8° BÁSICO)";
   }
-  return "Básica Primer Ciclo (1° a 4° Básico)";
+  return "BÁSICA PRIMER CICLO (1° A 4° BÁSICO)";
+}
+
+function isApproved(status) {
+  const s = String(status || "").trim().toUpperCase();
+  return s.startsWith("APROB");
 }
 
 async function getKpis(req, res) {
   try {
-    let totalGuardians = 0;
-    let totalStudents = 0;
-    let totalBenefits = 0;
-    let deliveredBenefits = 0;
-    let pendingBenefits = 0;
     let deliveriesToday = 0;
-
+    let deliveriesByDay = [];
     let deliveriesBySector = [];
     let distribucionSectores = [];
-    let distribucionNivel = [];
+
     let flujoPorHora = [
       { rango: "08:00 - 11:00", cantidad: 0 },
       { rango: "11:00 - 14:00", cantidad: 0 },
@@ -34,112 +37,103 @@ async function getKpis(req, res) {
       { rango: "17:00+", cantidad: 0 },
     ];
 
+    // 1. STOCK DE CONTROL LOGÍSTICO MUNICIPAL (METAS FIJAS DE LICITACIÓN)
     const stockMap = {
-      "Pre-Básica (Pre-Kinder y Kinder)": { nivel: "Pre-Básica (Pre-Kinder y Kinder)", inicial: 0, entregadas: 0, saldo: 0, pct: 0 },
-      "Básica Primer Ciclo (1° a 4° Básico)": { nivel: "Básica Primer Ciclo (1° a 4° Básico)", inicial: 0, entregadas: 0, saldo: 0, pct: 0 },
-      "Básica Segundo Ciclo (5° a 8° Básico)": { nivel: "Básica Segundo Ciclo (5° a 8° Básico)", inicial: 0, entregadas: 0, saldo: 0, pct: 0 },
-      "Media (1° a 4° Medio)": { nivel: "Media (1° a 4° Medio)", inicial: 0, entregadas: 0, saldo: 0, pct: 0 },
+      "PRE BÁSICA": { nivel: "PRE BÁSICA", licitacion: 800, inicial: 490, entregadas: 0, saldo: 490, pct: 0 },
+      "BÁSICA PRIMER CICLO (1° A 4° BÁSICO)": { nivel: "BÁSICA PRIMER CICLO (1° A 4° BÁSICO)", licitacion: 1700, inicial: 1443, entregadas: 0, saldo: 1443, pct: 0 },
+      "BÁSICA SEGUNDO CICLO (5° A 8° BÁSICO)": { nivel: "BÁSICA SEGUNDO CICLO (5° A 8° BÁSICO)", licitacion: 1700, inicial: 1569, entregadas: 0, saldo: 1569, pct: 0 },
+      "MEDIA": { nivel: "MEDIA", licitacion: 1500, inicial: 1124, entregadas: 0, saldo: 1124, pct: 0 },
+      "SUPERIOR": { nivel: "SUPERIOR", licitacion: 700, inicial: 419, entregadas: 0, saldo: 419, pct: 0 },
+    };
+
+    // 2. CONTADORES REALES DEL PADRÓN EXCEL
+    const pendientesPorNivelExcel = {
+      "PRE BÁSICA": 0,
+      "BÁSICA PRIMER CICLO (1° A 4° BÁSICO)": 0,
+      "BÁSICA SEGUNDO CICLO (5° A 8° BÁSICO)": 0,
+      "MEDIA": 0,
+      "SUPERIOR": 0,
     };
 
     const sectorCounter = {};
-    const nivelCounter = {};
-    let totalAprobadas = 0;
-    let entregadosConActa = 0;
+    let totalExcelAprobados = 0;
+    let entregadosExcelConActa = 0;
+    const todayStr = new Date().toISOString().slice(0, 10);
 
+    // CONSULTA POSTGRESQL O MEMORIA
     if (usePostgres) {
       try {
-        const statsRes = await pool.query(`
-          SELECT
-            COUNT(DISTINCT s.id) FILTER (WHERE UPPER(COALESCE(s.state, 'APROBADA')) = 'APROBADA')::int AS total_aprobadas,
-            COUNT(DISTINCT bb.id) FILTER (WHERE bb.status = 'DELIVERED')::int AS delivered_count,
-            COUNT(DISTINCT bb.id) FILTER (WHERE bb.status = 'DELIVERED' AND (DATE(bb.delivered_at) = CURRENT_DATE OR DATE(bb.delivered_at AT TIME ZONE 'America/Santiago') = CURRENT_DATE))::int AS deliveries_today
-          FROM students s
-          LEFT JOIN beneficiary_benefits bb ON bb.student_id = s.id
-        `);
-
-        if (statsRes.rowCount > 0) {
-          totalAprobadas = Number(statsRes.rows[0].total_aprobadas) || 0;
-          entregadosConActa = Number(statsRes.rows[0].delivered_count) || 0;
-          deliveriesToday = Number(statsRes.rows[0].deliveries_today) || 0;
-        }
-
-        // Sector distribution para aprobados
-        const secRes = await pool.query(`
-          SELECT COALESCE(NULLIF(g.sector, ''), 'CENTRO') AS sector, COUNT(s.id)::int AS total
-          FROM students s
-          JOIN guardians g ON g.id = s.guardian_id
-          WHERE UPPER(COALESCE(s.state, 'APROBADA')) = 'APROBADA'
-          GROUP BY COALESCE(NULLIF(g.sector, ''), 'CENTRO')
-          ORDER BY total DESC
-        `);
-        distribucionSectores = secRes.rows.map((r) => ({
-          sector: r.sector,
-          cantidad: Number(r.total),
-          deliveries: Number(r.total),
-        }));
-
-        // Stock y niveles
-        const lvlRes = await pool.query(`
+        const studentsRes = await pool.query(`
           SELECT 
+            s.id,
             s.educational_level,
+            COALESCE(g.sector, 'CENTRO') AS sector,
             bb.status,
             bb.delivered_at
           FROM students s
+          JOIN guardians g ON g.id = s.guardian_id
           LEFT JOIN beneficiary_benefits bb ON bb.student_id = s.id
-          WHERE UPPER(COALESCE(s.state, 'APROBADA')) = 'APROBADA'
+          WHERE UPPER(COALESCE(s.state, 'APROBADA')) LIKE 'APROB%'
         `);
 
-        lvlRes.rows.forEach((r) => {
-          const cat = categorizeLevel(r.educational_level);
-          if (stockMap[cat]) {
-            stockMap[cat].inicial += 1;
-            if (r.status === "DELIVERED") {
-              stockMap[cat].entregadas += 1;
+        studentsRes.rows.forEach((row) => {
+          totalExcelAprobados++;
+          const cat = categorizeLevel(row.educational_level);
+          const isDelivered = row.status === "DELIVERED";
+
+          if (isDelivered) {
+            entregadosExcelConActa++;
+            if (stockMap[cat]) stockMap[cat].entregadas += 1;
+
+            if (row.delivered_at) {
+              const d = new Date(row.delivered_at);
+              if (d.toISOString().slice(0, 10) === todayStr) deliveriesToday++;
+              const h = d.getHours();
+              if (h >= 8 && h < 11) flujoPorHora[0].cantidad++;
+              else if (h >= 11 && h < 14) flujoPorHora[1].cantidad++;
+              else if (h >= 14 && h < 17) flujoPorHora[2].cantidad++;
+              else flujoPorHora[3].cantidad++;
+            }
+          } else {
+            // PENDIENTE DE RETIRO EN EL EXCEL
+            if (pendientesPorNivelExcel[cat] !== undefined) {
+              pendientesPorNivelExcel[cat]++;
             }
           }
-          nivelCounter[cat] = (nivelCounter[cat] || 0) + 1;
 
-          // Franja horaria
-          if (r.status === "DELIVERED" && r.delivered_at) {
-            const date = new Date(r.delivered_at);
-            const hour = date.getHours();
-            if (hour >= 8 && hour < 11) flujoPorHora[0].cantidad++;
-            else if (hour >= 11 && hour < 14) flujoPorHora[1].cantidad++;
-            else if (hour >= 14 && hour < 17) flujoPorHora[2].cantidad++;
-            else flujoPorHora[3].cantidad++;
-          }
+          const sec = String(row.sector || "CENTRO").trim().toUpperCase();
+          sectorCounter[sec] = (sectorCounter[sec] || 0) + 1;
         });
       } catch (dbErr) {
-        console.warn("[REPORTS] Error consultando PostgreSQL, calculando desde memoria:", dbErr.message);
+        console.warn("[REPORTS] Error consultando PostgreSQL:", dbErr.message);
       }
     }
 
-    // Si PostgreSQL no tiene datos o estamos en modo memoria
-    if (totalAprobadas === 0 && memoryStore.students.size > 0) {
-      const todayStr = new Date().toISOString().slice(0, 10);
-
+    // SI POSTGRESQL NO RETORNÓ DATOS O ESTAMOS EN MEMORIA
+    if (totalExcelAprobados === 0 && memoryStore.students.size > 0) {
       for (const student of memoryStore.students.values()) {
-        const state = String(student.state || "APROBADA").toUpperCase();
-        if (state !== "APROBADA") continue;
+        const studentState = student.state || student.applicationStatus || "APROBADA";
+        if (!isApproved(studentState)) continue;
 
-        totalAprobadas++;
+        totalExcelAprobados++;
         const cat = categorizeLevel(student.educationalLevel);
-        if (stockMap[cat]) {
-          stockMap[cat].inicial++;
-        }
-        nivelCounter[cat] = (nivelCounter[cat] || 0) + 1;
 
         const guardian = memoryStore.guardians.get(student.guardianRut);
         const sector = String((guardian && guardian.sector) || "CENTRO").trim().toUpperCase();
         sectorCounter[sector] = (sectorCounter[sector] || 0) + 1;
 
-        const benefitId = `b-xl-${student.rut.replace(/[^0-9kK]/g, "")}`;
-        const b = memoryStore.benefits.get(benefitId) ||
-          Array.from(memoryStore.benefits.values()).find((item) => item.studentRut === student.rut);
+        const cleanRutKey = student.rut.replace(/[^0-9kK]/g, "");
+        const benefitId = `b-xl-${cleanRutKey}`;
+        let b = memoryStore.benefits.get(benefitId);
+        if (!b) {
+          b = Array.from(memoryStore.benefits.values()).find((item) => item.studentRut === student.rut);
+        }
 
-        if (b && b.status === "DELIVERED") {
-          entregadosConActa++;
-          if (stockMap[cat]) stockMap[cat].entregadas++;
+        const isDelivered = b && b.status === "DELIVERED";
+
+        if (isDelivered) {
+          entregadosExcelConActa++;
+          if (stockMap[cat]) stockMap[cat].entregadas += 1;
           if (b.deliveredAt && String(b.deliveredAt).startsWith(todayStr)) deliveriesToday++;
 
           if (b.deliveredAt) {
@@ -149,62 +143,66 @@ async function getKpis(req, res) {
             else if (h >= 14 && h < 17) flujoPorHora[2].cantidad++;
             else flujoPorHora[3].cantidad++;
           }
+        } else {
+          // PENDIENTE DE RETIRO REAL DEL EXCEL
+          if (pendientesPorNivelExcel[cat] !== undefined) {
+            pendientesPorNivelExcel[cat]++;
+          }
         }
       }
-
-      distribucionSectores = Object.entries(sectorCounter).map(([sector, cantidad]) => ({
-        sector,
-        cantidad,
-        deliveries: cantidad,
-      }));
     }
 
-    // Calcular saldos y porcentajes de stock
+    distribucionSectores = Object.entries(sectorCounter).map(([sector, cantidad]) => ({
+      sector,
+      cantidad,
+      deliveries: cantidad,
+    }));
+    deliveriesBySector = distribucionSectores;
+
+    // Tabla de stock logístico municipal (metas de 5.045)
     const stockPorNivel = Object.values(stockMap).map((item) => {
       const saldo = Math.max(0, item.inicial - item.entregadas);
       const pct = item.inicial > 0 ? Math.round((item.entregadas / item.inicial) * 100) : 0;
       return { ...item, saldo, pct };
     });
 
-    distribucionNivel = Object.entries(nivelCounter).map(([nivel, cantidad]) => ({
+    // PENDIENTES REALES DEL EXCEL
+    const pendientesExcel = Math.max(0, totalExcelAprobados - entregadosExcelConActa);
+    const porcentajeExcel = totalExcelAprobados > 0 ? Number(((entregadosExcelConActa / totalExcelAprobados) * 100).toFixed(1)) : 0;
+
+    // DISTRIBUCIÓN POR NIVEL: Muestra exactamente los PENDIENTES DEL EXCEL
+    const distribucionNivel = Object.entries(pendientesPorNivelExcel).map(([nivel, cantidad]) => ({
       nivel,
-      cantidad,
+      cantidad, // <-- PENDIENTES REALES DEL EXCEL
     }));
 
-    totalGuardians = memoryStore.guardians.size;
-    totalStudents = memoryStore.students.size;
-    totalBenefits = totalAprobadas;
-    deliveredBenefits = entregadosConActa;
-    pendingBenefits = Math.max(0, totalAprobadas - entregadosConActa);
-    const percentage = totalAprobadas > 0 ? Number(((deliveredBenefits / totalAprobadas) * 100).toFixed(1)) : 0;
-
-    deliveriesBySector = distribucionSectores;
+    const times = memoryStore.attentionTimes || [];
+    let avgAttentionSeconds = 0;
+    if (times.length > 0) {
+      avgAttentionSeconds = Math.round(times.reduce((a, b) => a + b, 0) / times.length);
+    }
 
     return res.json({
       message: "KPIs obtenidos correctamente.",
-      totalRegistros: totalAprobadas,
-      totalBeneficiariosAprobados: totalAprobadas,
-      totalEntregados: deliveredBenefits,
-      entregadosConActa,
-      totalPendientes: pendingBenefits,
-      pendientesDeRetiro: pendingBenefits,
+      // Datos del padrón Excel real:
+      totalExcelAprobados,
+      totalBeneficiariosAprobados: totalExcelAprobados,
+      totalRegistros: totalExcelAprobados,
+      totalEntregados: entregadosExcelConActa,
+      entregadosConActa: entregadosExcelConActa,
+      totalPendientes: pendientesExcel,
+      pendientesDeRetiro: pendientesExcel,
       entregadosHoy: deliveriesToday,
-      porcentaje: percentage,
-      stockPorNivel,
-      distribucionSectores,
+      porcentaje: porcentajeExcel,
+      tiempoPromedioSegundos: avgAttentionSeconds,
+      // Gráficos alimentados por el Excel:
       distribucionNivel,
+      distribucionSectores,
       deliveriesBySector,
+      // Tabla de stock de control municipal:
+      stockPorNivel,
       flujoPorHora,
-      porDia: [{ day: "Hoy", deliveries: deliveriesToday, total: deliveriesToday, fecha: new Date().toISOString().slice(0, 10) }],
-      kpis: {
-        totalGuardians,
-        totalStudents,
-        totalBenefits: totalAprobadas,
-        pendingBenefits,
-        deliveredBenefits,
-        deliveriesToday,
-        deliveryPercentage: percentage,
-      },
+      porDia: [{ day: "Hoy", deliveries: deliveriesToday, total: deliveriesToday, fecha: todayStr }],
     });
   } catch (error) {
     return res.status(500).json({ message: "Error al calcular indicadores.", error: error.message });
@@ -229,7 +227,6 @@ async function exportTransparencyCsv(req, res) {
     }
 
     const csvContent = "\uFEFF" + [headers.join(","), ...rows.map((r) => r.join(","))].join("\r\n");
-
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader(
       "Content-Disposition",

@@ -119,6 +119,7 @@ export const apiService = {
     longitude = null,
     captured_at = null,
     sync_status = 'SYNCED',
+    duration_seconds = null,
   }) {
     if (!rut) throw new Error('El RUT del apoderado es obligatorio');
     if (!benefitIds || benefitIds.length === 0) {
@@ -137,7 +138,9 @@ export const apiService = {
     if (longitude !== null && longitude !== undefined) formData.append('longitude', longitude);
     if (captured_at) formData.append('captured_at', captured_at);
     if (sync_status) formData.append('sync_status', sync_status);
-
+    if (duration_seconds !== null && duration_seconds !== undefined) {
+      formData.append('duration_seconds', duration_seconds);
+    }
     if (actaFile instanceof Blob && !actaFile.name) {
       formData.append('acta', actaFile, `acta_${Date.now()}.jpg`);
     } else {
@@ -172,16 +175,17 @@ export const apiService = {
     }
 
     const kpisObj = data.kpis || {};
-    const totalRegistros = data.totalRegistros ?? kpisObj.totalBenefits ?? 0;
-    const totalEntregados = data.totalEntregados ?? kpisObj.deliveredBenefits ?? 0;
-    const totalPendientes = data.totalPendientes ?? kpisObj.pendingBenefits ?? Math.max(0, totalRegistros - totalEntregados);
+    const totalRegistros = data.totalBeneficiariosAprobados ?? data.totalRegistros ?? kpisObj.totalBenefits ?? 0;
+    const totalEntregados = data.entregadosConActa ?? data.totalEntregados ?? kpisObj.deliveredBenefits ?? 0;
+    const totalPendientes = data.pendientesDeRetiro ?? data.totalPendientes ?? kpisObj.pendingBenefits ?? Math.max(0, totalRegistros - totalEntregados);
     const entregadosHoy = data.entregadosHoy ?? kpisObj.deliveriesToday ?? 0;
     const porcentaje = data.porcentaje ?? kpisObj.deliveryPercentage ?? (totalRegistros > 0 ? Number(((totalEntregados / totalRegistros) * 100).toFixed(1)) : 0);
 
     return {
+      ...data, // <-- IMPORTANTE: Pasa todos los campos (stockPorNivel, flujoPorHora, etc.)
       kpis: kpisObj,
       deliveriesByDay: data.deliveriesByDay || data.porDia || [],
-      deliveriesBySector: data.deliveriesBySector || [],
+      deliveriesBySector: data.deliveriesBySector || data.distribucionSectores || [],
       totalRegistros,
       totalEntregados,
       totalPendientes,
@@ -273,5 +277,19 @@ export const apiService = {
     a.click();
     window.URL.revokeObjectURL(url);
     a.remove();
+  },
+
+  async crearUsuarioTerreno({ firstName, lastName, email, password }) {
+    const res = await fetch(`${API_BASE}/api/auth/create-field-user`, {
+      method: 'POST',
+      headers: getAuthHeaders(true),
+      body: JSON.stringify({ firstName, lastName, email, password }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.message || 'Error al crear usuario de terreno');
+    }
+    return data;
   },
 };

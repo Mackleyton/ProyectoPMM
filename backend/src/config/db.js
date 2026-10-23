@@ -51,6 +51,7 @@ const memoryStore = {
   benefits: new Map(),
   deliveries: new Map(),
   evidences: new Map(),
+  attentionTimes: [],
   auditLogs: [],
 };
 

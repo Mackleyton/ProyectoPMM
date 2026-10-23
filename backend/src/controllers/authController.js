@@ -21,6 +21,7 @@ function createToken(user) {
   );
 }
 
+
 async function login(req, res) {
   const ipAddress = req.ip || req.connection.remoteAddress || "127.0.0.1";
   try {
@@ -105,7 +106,84 @@ async function getProfile(req, res) {
   return res.json({ user: req.user });
 }
 
+async function createFieldUser(req, res) {
+  const ipAddress = req.ip || req.connection.remoteAddress || "127.0.0.1";
+  try {
+    const { firstName, lastName, email, password } = req.body;
+
+    if (!firstName || !email || !password) {
+      return res.status(400).json({ message: "Nombre, correo y contraseña son obligatorios." });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ message: "La contraseña debe tener al menos 6 caracteres." });
+    }
+
+    const cleanEmail = String(email).trim().toLowerCase();
+    const fullName = `${firstName.trim()} ${(lastName || "").trim()}`.trim();
+    // El username será el correo o el prefijo antes del @
+    const username = cleanEmail;
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    // 1. Si usa PostgreSQL
+    if (usePostgres) {
+      try {
+        const checkRes = await pool.query("SELECT id FROM users WHERE username = $1 LIMIT 1", [username]);
+        if (checkRes.rowCount > 0) {
+          return res.status(400).json({ message: "Ya existe un usuario registrado con ese correo." });
+        }
+
+        await pool.query(
+          `INSERT INTO users (username, password_hash, role, active)
+           VALUES ($1, $2, 'FIELD_AGENT', TRUE)`,
+          [username, passwordHash]
+        );
+      } catch (dbErr) {
+        console.warn("[AUTH] Error creando usuario en PostgreSQL:", dbErr.message);
+      }
+    }
+
+    // 2. Si usa memoria
+    const existsInMem = memoryStore.users.some((u) => u.username.toLowerCase() === username);
+    if (existsInMem) {
+      return res.status(400).json({ message: "Ya existe un usuario registrado con ese correo." });
+    }
+
+    const newUser = {
+      id: `u-terreno-${Date.now()}`,
+      username,
+      password_hash: passwordHash,
+      role: "FIELD_AGENT",
+      name: fullName,
+      email: cleanEmail,
+      active: true,
+    };
+    memoryStore.users.push(newUser);
+
+    await recordAuditLog({
+      userId: req.user?.id,
+      username: req.user?.username || "admin",
+      action: "USER_CREATE_FIELD_AGENT",
+      details: { createdUsername: username, fullName },
+      ipAddress,
+    });
+
+    return res.status(201).json({
+      message: `Usuario de terreno creado exitosamente para ${fullName}.`,
+      user: {
+        id: newUser.id,
+        username,
+        name: fullName,
+        role: "FIELD_AGENT",
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ message: "Error al crear usuario de terreno.", error: error.message });
+  }
+}
+
 module.exports = {
   login,
   getProfile,
+  createFieldUser,
 };

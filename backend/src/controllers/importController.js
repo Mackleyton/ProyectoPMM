@@ -123,6 +123,99 @@ async function importExcel(req, res) {
   }
 }
 
+async function resetDatabase(req, res) {
+  const ipAddress = req.ip || req.connection.remoteAddress || "127.0.0.1";
+  try {
+    const uploadsDir = path.join(__dirname, "..", "..", "uploads", "actas");
+    if (fs.existsSync(uploadsDir)) {
+      const files = fs.readdirSync(uploadsDir);
+      for (const f of files) {
+        const fullPath = path.join(uploadsDir, f);
+        if (fs.statSync(fullPath).isFile()) {
+          fs.unlinkSync(fullPath);
+        }
+      }
+    }
+
+    if (usePostgres) {
+      const initSqlPath = path.join(__dirname, "..", "..", "database", "init.sql");
+      if (fs.existsSync(initSqlPath)) {
+        const sql = fs.readFileSync(initSqlPath, "utf-8");
+        await pool.query(sql);
+      }
+    }
+
+    memoryStore.guardians.clear();
+    memoryStore.students.clear();
+    memoryStore.benefits.clear();
+    memoryStore.deliveries.clear();
+    memoryStore.evidences.clear();
+
+    await recordAuditLog({
+      userId: req.user?.id,
+      username: req.user?.username || "admin",
+      action: "DATABASE_RESET",
+      details: { resetAt: new Date().toISOString() },
+      ipAddress,
+    });
+
+    return res.json({
+      ok: true,
+      message: "Base de datos y actas físicas reseteadas exitosamente.",
+    });
+  } catch (error) {
+    console.error("[RESET_DB] Error:", error);
+    return res.status(500).json({ message: "Error al reiniciar la base de datos.", error: error.message });
+  }
+}
+
+async function resetDatabase(req, res) {
+  const ipAddress = req.ip || req.connection.remoteAddress || "127.0.0.1";
+  try {
+    const uploadsDir = path.join(__dirname, "..", "..", "uploads", "actas");
+    if (fs.existsSync(uploadsDir)) {
+      const files = fs.readdirSync(uploadsDir);
+      for (const f of files) {
+        const fullPath = path.join(uploadsDir, f);
+        if (fs.statSync(fullPath).isFile()) {
+          fs.unlinkSync(fullPath);
+        }
+      }
+    }
+
+    if (usePostgres) {
+      const initSqlPath = path.join(__dirname, "..", "..", "database", "init.sql");
+      if (fs.existsSync(initSqlPath)) {
+        const sql = fs.readFileSync(initSqlPath, "utf-8");
+        await pool.query(sql);
+      }
+    }
+
+    memoryStore.guardians.clear();
+    memoryStore.students.clear();
+    memoryStore.benefits.clear();
+    memoryStore.deliveries.clear();
+    memoryStore.evidences.clear();
+
+    await recordAuditLog({
+      userId: req.user?.id,
+      username: req.user?.username || "admin",
+      action: "DATABASE_RESET",
+      details: { resetAt: new Date().toISOString() },
+      ipAddress,
+    });
+
+    return res.json({
+      ok: true,
+      message: "Base de datos y actas físicas reseteadas exitosamente.",
+    });
+  } catch (error) {
+    console.error("[RESET_DB] Error:", error);
+    return res.status(500).json({ message: "Error al reiniciar la base de datos.", error: error.message });
+  }
+}
+
 module.exports = {
   importExcel,
+  resetDatabase,
 };
