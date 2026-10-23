@@ -113,27 +113,6 @@ export default function LoginPage({ onLogin }) {
             </button>
           </form>
 
-          <div className="quick-access-section">
-            <span className="quick-access-title">Acceso rápido para funcionarios</span>
-            <div className="quick-btn-grid">
-              <button
-                type="button"
-                className="quick-role-btn"
-                onClick={() => handleQuick('admin')}
-                disabled={loading}
-              >
-                <strong>Administrador</strong> — Dashboard, Beneficiarios, Nóminas
-              </button>
-              <button
-                type="button"
-                className="quick-role-btn"
-                onClick={() => handleQuick('terreno')}
-                disabled={loading}
-              >
-                <strong>Operador Terreno</strong> — Búsqueda por RUT y Entregas
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </div>

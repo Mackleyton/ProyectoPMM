@@ -32,6 +32,8 @@ export default function TerrenoView() {
 
   const isSubmittingRef = useRef(false);
 
+  const [startTime, setStartTime] = useState(null); // <-- Tiempo de inicio de atención
+
   function handleRutChange(e) {
     const raw = e.target.value;
     const formatted = formatRut(raw);
@@ -63,7 +65,10 @@ export default function TerrenoView() {
     setFotoBlob(null);
     setFotoDataUrl(null);
     setDeliveryMeta(null);
-
+    setStartTime(Date.now());
+    
+    setLoading(true);
+    setSearchError('');
     try {
       const data = await apiService.buscarPorRut(rutLimpio);
       if (!data.guardian || (data.benefits && data.benefits.length === 0)) {
@@ -135,6 +140,8 @@ export default function TerrenoView() {
       const fechaNow = new Date().toLocaleTimeString('es-CL');
       const isOnline = navigator.onLine;
 
+      const durationSeconds = startTime ? Math.round((Date.now() - startTime) / 1000) : null;
+
       let deliveredResults = [];
       let wasOffline = false;
 
@@ -160,6 +167,7 @@ export default function TerrenoView() {
             longitude: deliveryMeta?.location?.longitude || null,
             captured_at: deliveryMeta?.capturedAt || new Date().toISOString(),
             sync_status: 'SYNCED',
+            duration_seconds: durationSeconds,
           });
           deliveredResults = res.deliveredBenefits || [];
         } catch (serverErr) {

@@ -14,6 +14,14 @@ import {
 } from 'lucide-react';
 import { apiService } from '../services/apiService';
 
+function formatDuration(seconds) {
+  if (!seconds || seconds <= 0) return '—';
+  if (seconds < 60) return `${seconds}s`;
+  const mins = Math.floor(seconds / 60);
+  const remSec = seconds % 60;
+  return remSec > 0 ? `${mins}m ${remSec}s` : `${mins} min`;
+}
+
 function actionBadge(action) {
   switch (action) {
     case 'AUTH_LOGIN_SUCCESS':
@@ -138,7 +146,7 @@ export default function AdminAuditoriaPage() {
                   <th>Fecha y Hora</th>
                   <th>Acción</th>
                   <th>Usuario</th>
-                  <th>IP Origen</th>
+                  <th>Tiempo de Atención</th>
                   <th>Detalles Técnicos</th>
                 </tr>
               </thead>
@@ -168,7 +176,15 @@ export default function AdminAuditoriaPage() {
                           <span>{log.username || 'Sistema'}</span>
                         </div>
                       </td>
-                      <td className="cell-secondary-text">{log.ip_address || '127.0.0.1'}</td>
+                      <td className="cell-secondary-text">
+  {log.action === 'DELIVERY_REGISTER' && log.details?.durationSeconds ? (
+    <span style={{ fontWeight: 600, color: '#0369a1', background: '#e0f2fe', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.85rem' }}>
+      ⏱️ {formatDuration(log.details.durationSeconds)}
+    </span>
+  ) : (
+    <span style={{ color: '#94a3b8' }}>—</span>
+  )}
+</td>
                       <td>
                         <div className="audit-details-cell">
                           {log.details ? (
