@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { apiService } from '../services/apiService';
+import { apiService, API_BASE } from '../services/apiService';
 import { formatRut, cleanRut } from '../utils/rutUtils';
 
 export default function AdminBeneficiariosPage() {
@@ -10,6 +10,7 @@ export default function AdminBeneficiariosPage() {
 
   // Beneficiario seleccionado para ver el detalle
   const [selectedItem, setSelectedItem] = useState(null);
+  const [modalFotoOpen, setModalFotoOpen] = useState(false);
 
   // Estado del modal de importación con los dos modos solicitados
   const [importModalOpen, setImportModalOpen] = useState(false);
@@ -20,6 +21,14 @@ export default function AdminBeneficiariosPage() {
   const [importError, setImportError] = useState('');
 
   const fileInputRef = useRef(null);
+
+  function getFullPhotoUrl(url) {
+    if (!url) return null;
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+      return url;
+    }
+    return `${API_BASE}${url.startsWith('/') ? '' : '/'}${url}`;
+  }
 
   async function cargar() {
     setLoading(true);
@@ -313,9 +322,12 @@ export default function AdminBeneficiariosPage() {
                     <div className="acta-document-preview">
                       {selectedItem.foto_acta ? (
                         <img
-                          src={selectedItem.foto_acta}
+                          src={getFullPhotoUrl(selectedItem.foto_acta)}
                           alt="Acta de entrega firmada"
                           className="acta-real-photo"
+                          onClick={() => setModalFotoOpen(true)}
+                          style={{ cursor: 'zoom-in' }}
+                          title="Click para ampliar el acta"
                         />
                       ) : (
                         <div className="acta-paper-mockup">
@@ -340,15 +352,24 @@ export default function AdminBeneficiariosPage() {
                           : 'Entrega registrada en terreno'}
                       </span>
                       {selectedItem.foto_acta && (
-                        <a
-                          href={selectedItem.foto_acta}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="btn btn-outline btn-sm"
-                          style={{ marginTop: '10px' }}
-                        >
-                          Ver Fotografía Original
-                        </a>
+                        <div style={{ display: 'flex', gap: '0.4rem', marginTop: '10px' }}>
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            onClick={() => setModalFotoOpen(true)}
+                          >
+                            🔍 Ver Fotografía Original
+                          </button>
+                          <a
+                            href={getFullPhotoUrl(selectedItem.foto_acta)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="btn btn-outline btn-sm"
+                            title="Abrir en pestaña nueva"
+                          >
+                            Abrir enlace
+                          </a>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -362,6 +383,90 @@ export default function AdminBeneficiariosPage() {
                   </div>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL LIGHTBOX FOTOGRAFÍA ORIGINAL DEL ACTA */}
+      {modalFotoOpen && selectedItem?.foto_acta && (
+        <div
+          onClick={() => setModalFotoOpen(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.85)',
+            backdropFilter: 'blur(5px)',
+            zIndex: 10000,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1.5rem',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'relative',
+              maxWidth: '92vw',
+              maxHeight: '90vh',
+              background: '#fff',
+              borderRadius: '12px',
+              padding: '1rem',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+              <div>
+                <h4 style={{ margin: 0, color: '#0f172a', fontSize: '1.1rem' }}>
+                  Acta de Entrega: {selectedItem.nombre_alumno || selectedItem.nombre_apoderado}
+                </h4>
+                <small style={{ color: '#64748b' }}>RUT: {selectedItem.rut_apoderado}</small>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalFotoOpen(false)}
+                style={{
+                  background: '#f1f5f9',
+                  border: 'none',
+                  borderRadius: '50%',
+                  width: '32px',
+                  height: '32px',
+                  cursor: 'pointer',
+                  fontSize: '1.1rem',
+                  color: '#475569',
+                }}
+              >
+                ✕
+              </button>
+            </div>
+            <div style={{ flex: 1, overflow: 'auto', textAlign: 'center', background: '#0f172a', borderRadius: '8px', padding: '0.5rem' }}>
+              <img
+                src={getFullPhotoUrl(selectedItem.foto_acta)}
+                alt="Fotografía original del acta de entrega"
+                style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain' }}
+              />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '0.75rem' }}>
+              <a
+                href={getFullPhotoUrl(selectedItem.foto_acta)}
+                download={`acta_${selectedItem.rut_apoderado}.jpg`}
+                target="_blank"
+                rel="noreferrer"
+                className="btn btn-outline btn-sm"
+              >
+                Descargar Imagen
+              </a>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => setModalFotoOpen(false)}
+              >
+                Cerrar
+              </button>
             </div>
           </div>
         </div>

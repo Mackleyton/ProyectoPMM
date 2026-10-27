@@ -280,15 +280,45 @@ export const apiService = {
   },
 
   async crearUsuarioTerreno({ firstName, lastName, email, password }) {
-    const res = await fetch(`${API_BASE}/api/auth/create-field-user`, {
-      method: 'POST',
-      headers: getAuthHeaders(true),
-      body: JSON.stringify({ firstName, lastName, email, password }),
+    return this.crearUsuario({ firstName, lastName, email, password, role: 'FIELD_AGENT' });
+  },
+
+  async obtenerUsuarios() {
+    const res = await fetch(`${API_BASE}/api/auth/users`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
     });
 
     const data = await res.json();
     if (!res.ok) {
-      throw new Error(data.message || 'Error al crear usuario de terreno');
+      throw new Error(data.message || 'Error al obtener usuarios');
+    }
+    return data.users || [];
+  },
+
+  async crearUsuario({ firstName, lastName, email, password, role = 'FIELD_AGENT' }) {
+    const res = await fetch(`${API_BASE}/api/auth/users`, {
+      method: 'POST',
+      headers: getAuthHeaders(true),
+      body: JSON.stringify({ firstName, lastName, email, password, role }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.message || 'Error al crear usuario');
+    }
+    return data;
+  },
+
+  async eliminarUsuario(userId) {
+    const res = await fetch(`${API_BASE}/api/auth/users/${encodeURIComponent(userId)}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.message || 'Error al eliminar usuario');
     }
     return data;
   },

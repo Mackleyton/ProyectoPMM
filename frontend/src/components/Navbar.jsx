@@ -14,6 +14,8 @@ import {
   Menu,
   X,
   UserPlus,
+  Trash2,
+  ShieldAlert,
 } from 'lucide-react';
 import { offlineStorage } from '../services/offlineStorage';
 import { apiService } from '../services/apiService';
@@ -27,11 +29,15 @@ export default function Navbar({ user, onLogout }) {
   const [pendingCount, setPendingCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  // Estados para Modal de Crear Operador
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [formData, setFormData] = useState({ firstName: '', lastName: '', email: '', password: '' });
+  // Estados para Modal de Gestión de Usuarios
+  const [showUserModal, setShowUserModal] = useState(false);
+  const [activeTab, setActiveTab] = useState('list'); // 'list' | 'create'
+  const [usersList, setUsersList] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [formData, setFormData] = useState({ firstName: '', lastName: '', email: '', password: '', role: 'FIELD_AGENT' });
   const [createLoading, setCreateLoading] = useState(false);
   const [createMsg, setCreateMsg] = useState({ error: '', success: '' });
+  const [deleteLoadingId, setDeleteLoadingId] = useState(null);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -129,23 +135,59 @@ export default function Navbar({ user, onLogout }) {
     }
   };
 
+  async function loadUsers() {
+    setUsersLoading(true);
+    try {
+      const data = await apiService.obtenerUsuarios();
+      setUsersList(data);
+    } catch (err) {
+      console.warn('Error cargando usuarios:', err.message);
+    } finally {
+      setUsersLoading(false);
+    }
+  }
+
+  function handleOpenUserModal() {
+    setShowUserModal(true);
+    setActiveTab('list');
+    setCreateMsg({ error: '', success: '' });
+    loadUsers();
+  }
+
   async function handleCreateUser(e) {
     e.preventDefault();
     setCreateMsg({ error: '', success: '' });
     setCreateLoading(true);
 
     try {
-      const res = await apiService.crearUsuarioTerreno(formData);
+      const res = await apiService.crearUsuario(formData);
       setCreateMsg({ success: res.message || 'Usuario creado con éxito', error: '' });
-      setFormData({ firstName: '', lastName: '', email: '', password: '' });
+      setFormData({ firstName: '', lastName: '', email: '', password: '', role: 'FIELD_AGENT' });
+      await loadUsers();
       setTimeout(() => {
-        setShowCreateModal(false);
+        setActiveTab('list');
         setCreateMsg({ error: '', success: '' });
-      }, 1500);
+      }, 1200);
     } catch (err) {
       setCreateMsg({ error: err.message || 'Error al crear usuario', success: '' });
     } finally {
       setCreateLoading(false);
+    }
+  }
+
+  async function handleDeleteUser(userId, userIdentifier) {
+    if (!window.confirm(`¿Estás seguro de eliminar al usuario "${userIdentifier}"? Esta acción no se puede deshacer.`)) {
+      return;
+    }
+
+    setDeleteLoadingId(userId);
+    try {
+      await apiService.eliminarUsuario(userId);
+      await loadUsers();
+    } catch (err) {
+      alert(err.message || 'Error al eliminar usuario');
+    } finally {
+      setDeleteLoadingId(null);
     }
   }
 
@@ -259,16 +301,16 @@ export default function Navbar({ user, onLogout }) {
       </nav>
 
       <div className="navbar-right">
-        {/* BOTÓN CREAR OPERADOR (SOLO ADMIN) */}
+        {/* BOTÓN GESTIONAR / AGREGAR USUARIOS (SOLO ADMIN) */}
         {isAdmin && (
           <button
             type="button"
             className="btn btn-primary btn-sm"
-            onClick={() => setShowCreateModal(true)}
+            onClick={handleOpenUserModal}
             style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
           >
             <UserPlus size={15} />
-            <span className="hide-on-small">Crear Operador</span>
+            <span className="hide-on-small">Agregar Usuario</span>
           </button>
         )}
 
@@ -295,13 +337,13 @@ export default function Navbar({ user, onLogout }) {
         </div>
       </div>
 
-      {/* MODAL CREAR USUARIO DE TERRENO */}
-      {showCreateModal && (
+      {/* MODAL GESTIÓN Y CREACIÓN DE USUARIOS */}
+      {showUserModal && (
         <div style={{
           position: 'fixed',
           inset: 0,
-          background: 'rgba(15, 23, 42, 0.6)',
-          backdropFilter: 'blur(3px)',
+          background: 'rgba(15, 23, 42, 0.65)',
+          backdropFilter: 'blur(4px)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -310,20 +352,67 @@ export default function Navbar({ user, onLogout }) {
         }}>
           <div style={{
             background: '#fff',
-            borderRadius: '12px',
+            borderRadius: '14px',
             width: '100%',
-            maxWidth: '460px',
+            maxWidth: '580px',
             padding: '1.5rem',
-            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-              <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700, color: '#0f172a' }}>Crear Operador de Terreno</h3>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Users size={20} color="#1a56db" />
+                <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: '#0f172a' }}>
+                  Gestión de Usuarios
+                </h3>
+              </div>
               <button
                 type="button"
-                onClick={() => setShowCreateModal(false)}
+                onClick={() => setShowUserModal(false)}
                 style={{ background: 'none', border: 'none', fontSize: '1.25rem', cursor: 'pointer', color: '#64748b' }}
               >
                 ✕
+              </button>
+            </div>
+
+            {/* Pestañas: Lista de Usuarios / Agregar Usuario */}
+            <div style={{ display: 'flex', borderBottom: '1px solid #e2e8f0', marginBottom: '1.2rem', gap: '0.5rem' }}>
+              <button
+                type="button"
+                onClick={() => setActiveTab('list')}
+                style={{
+                  padding: '0.5rem 1rem',
+                  border: 'none',
+                  background: 'none',
+                  fontWeight: 600,
+                  fontSize: '0.9rem',
+                  cursor: 'pointer',
+                  borderBottom: activeTab === 'list' ? '3px solid #1a56db' : '3px solid transparent',
+                  color: activeTab === 'list' ? '#1a56db' : '#64748b',
+                }}
+              >
+                Usuarios Registrados ({usersList.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('create');
+                  setCreateMsg({ error: '', success: '' });
+                }}
+                style={{
+                  padding: '0.5rem 1rem',
+                  border: 'none',
+                  background: 'none',
+                  fontWeight: 600,
+                  fontSize: '0.9rem',
+                  cursor: 'pointer',
+                  borderBottom: activeTab === 'create' ? '3px solid #1a56db' : '3px solid transparent',
+                  color: activeTab === 'create' ? '#1a56db' : '#64748b',
+                }}
+              >
+                + Agregar Usuario
               </button>
             </div>
 
@@ -338,73 +427,183 @@ export default function Navbar({ user, onLogout }) {
               </div>
             )}
 
-            <form onSubmit={handleCreateUser} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#334155', marginBottom: '0.25rem' }}>Nombre</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ej: Juan"
-                  value={formData.firstName}
-                  onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
-                  style={{ width: '100%', padding: '0.55rem', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.9rem' }}
-                />
-              </div>
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {activeTab === 'list' ? (
+                <div>
+                  {usersLoading ? (
+                    <div style={{ textAlign: 'center', padding: '2rem', color: '#64748b' }}>
+                      <RotateCw className="spin" size={24} style={{ marginBottom: '0.5rem' }} />
+                      <p style={{ margin: 0 }}>Cargando usuarios...</p>
+                    </div>
+                  ) : usersList.length === 0 ? (
+                    <p style={{ textAlign: 'center', color: '#94a3b8', padding: '1.5rem' }}>No hay usuarios para mostrar.</p>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                      {usersList.map((u) => {
+                        const isCurrent = user?.id && String(user.id) === String(u.id);
+                        const isMainAdmin = u.username === 'admin';
+                        const isDeletable = !isCurrent && !isMainAdmin;
+                        const roleColor = u.role === 'ADMIN' ? '#7c3aed' : '#0284c7';
+                        const roleBg = u.role === 'ADMIN' ? '#f5f3ff' : '#f0f9ff';
 
-              <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#334155', marginBottom: '0.25rem' }}>Apellido</label>
-                <input
-                  type="text"
-                  placeholder="Ej: Pérez"
-                  value={formData.lastName}
-                  onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
-                  style={{ width: '100%', padding: '0.55rem', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.9rem' }}
-                />
-              </div>
+                        return (
+                          <div
+                            key={u.id}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '0.75rem 1rem',
+                              border: '1px solid #e2e8f0',
+                              borderRadius: '8px',
+                              background: '#f8fafc',
+                            }}
+                          >
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <strong style={{ color: '#0f172a', fontSize: '0.95rem' }}>{u.name || u.username}</strong>
+                                <span
+                                  style={{
+                                    fontSize: '0.75rem',
+                                    fontWeight: 700,
+                                    padding: '0.15rem 0.5rem',
+                                    borderRadius: '9999px',
+                                    background: roleBg,
+                                    color: roleColor,
+                                    border: `1px solid ${roleColor}33`,
+                                  }}
+                                >
+                                  {u.role === 'ADMIN' ? 'Administrador' : 'Terreno'}
+                                </span>
+                                {isCurrent && (
+                                  <span style={{ fontSize: '0.7rem', color: '#16a34a', fontWeight: 600 }}>
+                                    (Tú)
+                                  </span>
+                                )}
+                              </div>
+                              <span style={{ fontSize: '0.82rem', color: '#64748b' }}>{u.username}</span>
+                            </div>
 
-              <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#334155', marginBottom: '0.25rem' }}>Correo Electrónico (será su usuario de acceso)</label>
-                <input
-                  type="email"
-                  required
-                  placeholder="jperez@quilpue.cl"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  style={{ width: '100%', padding: '0.55rem', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.9rem' }}
-                />
-              </div>
+                            <div>
+                              {isDeletable ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteUser(u.id, u.username)}
+                                  disabled={deleteLoadingId === u.id}
+                                  title="Eliminar este usuario"
+                                  style={{
+                                    background: '#fee2e2',
+                                    border: '1px solid #fca5a5',
+                                    color: '#b91c1c',
+                                    padding: '0.4rem 0.6rem',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.3rem',
+                                    fontSize: '0.8rem',
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  <Trash2 size={14} />
+                                  {deleteLoadingId === u.id ? 'Borrando...' : 'Eliminar'}
+                                </button>
+                              ) : (
+                                <span style={{ fontSize: '0.75rem', color: '#94a3b8', fontStyle: 'italic' }}>
+                                  {isMainAdmin ? 'Protegido' : 'En sesión'}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <form onSubmit={handleCreateUser} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#334155', marginBottom: '0.25rem' }}>Nombre</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Ej: Juan"
+                        value={formData.firstName}
+                        onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
+                        style={{ width: '100%', padding: '0.55rem', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.9rem' }}
+                      />
+                    </div>
 
-              <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#334155', marginBottom: '0.25rem' }}>Contraseña</label>
-                <input
-                  type="password"
-                  required
-                  placeholder="Mínimo 6 caracteres"
-                  value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  style={{ width: '100%', padding: '0.55rem', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.9rem' }}
-                />
-              </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#334155', marginBottom: '0.25rem' }}>Apellido</label>
+                      <input
+                        type="text"
+                        placeholder="Ej: Pérez"
+                        value={formData.lastName}
+                        onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
+                        style={{ width: '100%', padding: '0.55rem', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.9rem' }}
+                      />
+                    </div>
+                  </div>
 
-              <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
-                <button
-                  type="button"
-                  className="btn btn-outline"
-                  onClick={() => setShowCreateModal(false)}
-                  style={{ flex: 1, justifyContent: 'center' }}
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  disabled={createLoading}
-                  style={{ flex: 1, justifyContent: 'center' }}
-                >
-                  {createLoading ? 'Creando…' : 'Crear Operador'}
-                </button>
-              </div>
-            </form>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#334155', marginBottom: '0.25rem' }}>Tipo de Usuario (Rol)</label>
+                    <select
+                      value={formData.role}
+                      onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                      style={{ width: '100%', padding: '0.55rem', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.9rem', background: '#fff' }}
+                    >
+                      <option value="FIELD_AGENT">Operador de Terreno (Registro de entregas y consulta)</option>
+                      <option value="ADMIN">Administrador (Acceso total, reportes, carga de planillas y gestión)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#334155', marginBottom: '0.25rem' }}>Correo Electrónico (será su nombre de usuario)</label>
+                    <input
+                      type="email"
+                      required
+                      placeholder="usuario@quilpue.cl"
+                      value={formData.email}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                      style={{ width: '100%', padding: '0.55rem', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.9rem' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: '#334155', marginBottom: '0.25rem' }}>Contraseña de Acceso</label>
+                    <input
+                      type="password"
+                      required
+                      placeholder="Mínimo 6 caracteres"
+                      value={formData.password}
+                      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                      style={{ width: '100%', padding: '0.55rem', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '0.9rem' }}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+                    <button
+                      type="button"
+                      className="btn btn-outline"
+                      onClick={() => setActiveTab('list')}
+                      style={{ flex: 1, justifyContent: 'center' }}
+                    >
+                      Ver Usuarios
+                    </button>
+                    <button
+                      type="submit"
+                      className="btn btn-primary"
+                      disabled={createLoading}
+                      style={{ flex: 1, justifyContent: 'center' }}
+                    >
+                      {createLoading ? 'Creando...' : (formData.role === 'ADMIN' ? 'Crear Administrador' : 'Crear Operador')}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
           </div>
         </div>
       )}
