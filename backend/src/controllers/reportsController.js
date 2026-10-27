@@ -1,138 +1,208 @@
 const { pool, usePostgres, memoryStore } = require("../config/db");
 
+// Clasificación canónica de los 5 niveles oficiales
+function categorizeLevel(lvl) {
+  const s = String(lvl || "").toLowerCase();
+  if (s.includes("pre") || s.includes("kinder") || s.includes("kínder")) {
+    return "PRE BÁSICA";
+  }
+  if (s.includes("superior") || s.includes("universitaria") || s.includes("instituto") || s.includes("cft")) {
+    return "SUPERIOR";
+  }
+  if (s.includes("media") || s.includes("secundaria")) {
+    return "MEDIA";
+  }
+  if (s.includes("segundo") || s.includes("5") || s.includes("6") || s.includes("7") || s.includes("8")) {
+    return "BÁSICA SEGUNDO CICLO (5° A 8° BÁSICO)";
+  }
+  return "BÁSICA PRIMER CICLO (1° A 4° BÁSICO)";
+}
+
+function isApproved(status) {
+  const s = String(status || "").trim().toUpperCase();
+  return s.startsWith("APROB");
+}
+
 async function getKpis(req, res) {
   try {
-    let totalGuardians = 0;
-    let totalStudents = 0;
-    let totalBenefits = 0;
-    let deliveredBenefits = 0;
-    let pendingBenefits = 0;
     let deliveriesToday = 0;
     let deliveriesByDay = [];
     let deliveriesBySector = [];
+    let distribucionSectores = [];
 
+    let flujoPorHora = [
+      { rango: "08:00 - 11:00", cantidad: 0 },
+      { rango: "11:00 - 14:00", cantidad: 0 },
+      { rango: "14:00 - 17:00", cantidad: 0 },
+      { rango: "17:00+", cantidad: 0 },
+    ];
+
+    // 1. STOCK DE CONTROL LOGÍSTICO MUNICIPAL (METAS FIJAS DE LICITACIÓN)
+    const stockMap = {
+      "PRE BÁSICA": { nivel: "PRE BÁSICA", licitacion: 800, inicial: 490, entregadas: 0, saldo: 490, pct: 0 },
+      "BÁSICA PRIMER CICLO (1° A 4° BÁSICO)": { nivel: "BÁSICA PRIMER CICLO (1° A 4° BÁSICO)", licitacion: 1700, inicial: 1443, entregadas: 0, saldo: 1443, pct: 0 },
+      "BÁSICA SEGUNDO CICLO (5° A 8° BÁSICO)": { nivel: "BÁSICA SEGUNDO CICLO (5° A 8° BÁSICO)", licitacion: 1700, inicial: 1569, entregadas: 0, saldo: 1569, pct: 0 },
+      "MEDIA": { nivel: "MEDIA", licitacion: 1500, inicial: 1124, entregadas: 0, saldo: 1124, pct: 0 },
+      "SUPERIOR": { nivel: "SUPERIOR", licitacion: 700, inicial: 419, entregadas: 0, saldo: 419, pct: 0 },
+    };
+
+    // 2. CONTADORES REALES DEL PADRÓN EXCEL
+    const pendientesPorNivelExcel = {
+      "PRE BÁSICA": 0,
+      "BÁSICA PRIMER CICLO (1° A 4° BÁSICO)": 0,
+      "BÁSICA SEGUNDO CICLO (5° A 8° BÁSICO)": 0,
+      "MEDIA": 0,
+      "SUPERIOR": 0,
+    };
+
+    const sectorCounter = {};
+    let totalExcelAprobados = 0;
+    let entregadosExcelConActa = 0;
+    const todayStr = new Date().toISOString().slice(0, 10);
+
+    // CONSULTA POSTGRESQL O MEMORIA
     if (usePostgres) {
       try {
-        const statsRes = await pool.query(`
-          SELECT
-            COUNT(DISTINCT bb.guardian_id)::int AS total_guardians,
-            COUNT(DISTINCT bb.student_id)::int AS total_students,
-            COUNT(*)::int AS total_benefits,
-            COUNT(*) FILTER (WHERE bb.status = 'DELIVERED')::int AS delivered_benefits,
-            COUNT(*) FILTER (WHERE bb.status != 'DELIVERED' OR bb.status IS NULL)::int AS pending_benefits,
-            COUNT(*) FILTER (WHERE bb.status = 'DELIVERED' AND (DATE(bb.delivered_at) = CURRENT_DATE OR DATE(bb.delivered_at AT TIME ZONE 'America/Santiago') = CURRENT_DATE))::int AS deliveries_today
-          FROM beneficiary_benefits bb
+        const studentsRes = await pool.query(`
+          SELECT 
+            s.id,
+            s.educational_level,
+            COALESCE(g.sector, 'CENTRO') AS sector,
+            bb.status,
+            bb.delivered_at
+          FROM students s
+          JOIN guardians g ON g.id = s.guardian_id
+          LEFT JOIN beneficiary_benefits bb ON bb.student_id = s.id
+          WHERE UPPER(COALESCE(s.state, 'APROBADA')) LIKE 'APROB%'
         `);
 
-        if (statsRes.rowCount > 0 && Number(statsRes.rows[0].total_benefits) > 0) {
-          const row = statsRes.rows[0];
-          totalGuardians = Number(row.total_guardians) || 0;
-          totalStudents = Number(row.total_students) || 0;
-          totalBenefits = Number(row.total_benefits) || 0;
-          deliveredBenefits = Number(row.delivered_benefits) || 0;
-          pendingBenefits = Number(row.pending_benefits) || 0;
-          deliveriesToday = Number(row.deliveries_today) || 0;
+        studentsRes.rows.forEach((row) => {
+          totalExcelAprobados++;
+          const cat = categorizeLevel(row.educational_level);
+          const isDelivered = row.status === "DELIVERED";
 
-          const sectorRes = await pool.query(`
-            SELECT 
-              COALESCE(g.sector, 'Centro') AS sector,
-              COUNT(bb.id)::int AS deliveries
-            FROM beneficiary_benefits bb
-            JOIN guardians g ON g.id = bb.guardian_id
-            WHERE bb.status = 'DELIVERED'
-            GROUP BY COALESCE(g.sector, 'Centro')
-            ORDER BY deliveries DESC
-          `);
-          if (sectorRes.rowCount > 0) {
-            deliveriesBySector = sectorRes.rows.map((r) => ({
-              sector: r.sector,
-              deliveries: Number(r.deliveries),
-            }));
+          if (isDelivered) {
+            entregadosExcelConActa++;
+            if (stockMap[cat]) stockMap[cat].entregadas += 1;
+
+            if (row.delivered_at) {
+              const d = new Date(row.delivered_at);
+              if (d.toISOString().slice(0, 10) === todayStr) deliveriesToday++;
+              const h = d.getHours();
+              if (h >= 8 && h < 11) flujoPorHora[0].cantidad++;
+              else if (h >= 11 && h < 14) flujoPorHora[1].cantidad++;
+              else if (h >= 14 && h < 17) flujoPorHora[2].cantidad++;
+              else flujoPorHora[3].cantidad++;
+            }
+          } else {
+            // PENDIENTE DE RETIRO EN EL EXCEL
+            if (pendientesPorNivelExcel[cat] !== undefined) {
+              pendientesPorNivelExcel[cat]++;
+            }
           }
 
-          const daysRes = await pool.query(`
-            SELECT 
-              TO_CHAR(bb.delivered_at, 'YYYY-MM-DD') AS fecha,
-              TO_CHAR(bb.delivered_at, 'Day') AS dia_nombre,
-              COUNT(bb.id)::int AS total
-            FROM beneficiary_benefits bb
-            WHERE bb.status = 'DELIVERED' AND bb.delivered_at IS NOT NULL
-            GROUP BY TO_CHAR(bb.delivered_at, 'YYYY-MM-DD'), TO_CHAR(bb.delivered_at, 'Day')
-            ORDER BY fecha ASC
-            LIMIT 14
-          `);
-          if (daysRes.rowCount > 0) {
-            deliveriesByDay = daysRes.rows.map((r) => ({
-              day: r.dia_nombre ? r.dia_nombre.trim() : r.fecha,
-              deliveries: Number(r.total),
-              total: Number(r.total),
-              fecha: r.fecha,
-            }));
-          }
-        }
+          const sec = String(row.sector || "CENTRO").trim().toUpperCase();
+          sectorCounter[sec] = (sectorCounter[sec] || 0) + 1;
+        });
       } catch (dbErr) {
         console.warn("[REPORTS] Error consultando PostgreSQL:", dbErr.message);
       }
     }
 
-    if (totalBenefits === 0) {
-      totalGuardians = memoryStore.guardians.size;
-      totalStudents = memoryStore.students.size;
-      totalBenefits = memoryStore.benefits.size;
-      deliveredBenefits = 0;
-      pendingBenefits = 0;
+    // SI POSTGRESQL NO RETORNÓ DATOS O ESTAMOS EN MEMORIA
+    if (totalExcelAprobados === 0 && memoryStore.students.size > 0) {
+      for (const student of memoryStore.students.values()) {
+        const studentState = student.state || student.applicationStatus || "APROBADA";
+        if (!isApproved(studentState)) continue;
 
-      for (const b of memoryStore.benefits.values()) {
-        if (b.status === "DELIVERED") deliveredBenefits++;
-        else pendingBenefits++;
-      }
+        totalExcelAprobados++;
+        const cat = categorizeLevel(student.educationalLevel);
 
-      const todayStr = new Date().toISOString().slice(0, 10);
-      deliveriesToday = 0;
-      for (const b of memoryStore.benefits.values()) {
-        if (b.status === "DELIVERED" && b.deliveredAt && b.deliveredAt.startsWith(todayStr)) {
-          deliveriesToday++;
+        const guardian = memoryStore.guardians.get(student.guardianRut);
+        const sector = String((guardian && guardian.sector) || "CENTRO").trim().toUpperCase();
+        sectorCounter[sector] = (sectorCounter[sector] || 0) + 1;
+
+        const cleanRutKey = student.rut.replace(/[^0-9kK]/g, "");
+        const benefitId = `b-xl-${cleanRutKey}`;
+        let b = memoryStore.benefits.get(benefitId);
+        if (!b) {
+          b = Array.from(memoryStore.benefits.values()).find((item) => item.studentRut === student.rut);
+        }
+
+        const isDelivered = b && b.status === "DELIVERED";
+
+        if (isDelivered) {
+          entregadosExcelConActa++;
+          if (stockMap[cat]) stockMap[cat].entregadas += 1;
+          if (b.deliveredAt && String(b.deliveredAt).startsWith(todayStr)) deliveriesToday++;
+
+          if (b.deliveredAt) {
+            const h = new Date(b.deliveredAt).getHours();
+            if (h >= 8 && h < 11) flujoPorHora[0].cantidad++;
+            else if (h >= 11 && h < 14) flujoPorHora[1].cantidad++;
+            else if (h >= 14 && h < 17) flujoPorHora[2].cantidad++;
+            else flujoPorHora[3].cantidad++;
+          }
+        } else {
+          // PENDIENTE DE RETIRO REAL DEL EXCEL
+          if (pendientesPorNivelExcel[cat] !== undefined) {
+            pendientesPorNivelExcel[cat]++;
+          }
         }
       }
     }
 
-    if (deliveriesBySector.length === 0) {
-      deliveriesBySector = [
-        { sector: "Belloto Norte", deliveries: deliveredBenefits > 0 ? Math.round(deliveredBenefits * 0.25) : 0 },
-        { sector: "Belloto Sur", deliveries: deliveredBenefits > 0 ? Math.round(deliveredBenefits * 0.2) : 0 },
-        { sector: "Quilpué Centro", deliveries: deliveredBenefits > 0 ? Math.round(deliveredBenefits * 0.35) : 0 },
-        { sector: "Canal Chacao", deliveries: deliveredBenefits > 0 ? Math.round(deliveredBenefits * 0.1) : 0 },
-        { sector: "Pompeya", deliveries: deliveredBenefits > 0 ? Math.round(deliveredBenefits * 0.1) : 0 },
-      ];
-    }
+    distribucionSectores = Object.entries(sectorCounter).map(([sector, cantidad]) => ({
+      sector,
+      cantidad,
+      deliveries: cantidad,
+    }));
+    deliveriesBySector = distribucionSectores;
 
-    if (deliveriesByDay.length === 0) {
-      deliveriesByDay = [
-        { day: "Hoy", deliveries: deliveriesToday, total: deliveriesToday, fecha: new Date().toISOString().slice(0, 10) },
-      ];
-    }
+    // Tabla de stock logístico municipal (metas de 5.045)
+    const stockPorNivel = Object.values(stockMap).map((item) => {
+      const saldo = Math.max(0, item.inicial - item.entregadas);
+      const pct = item.inicial > 0 ? Math.round((item.entregadas / item.inicial) * 100) : 0;
+      return { ...item, saldo, pct };
+    });
 
-    const percentage = totalBenefits > 0 ? Number(((deliveredBenefits / totalBenefits) * 100).toFixed(1)) : 0;
+    // PENDIENTES REALES DEL EXCEL
+    const pendientesExcel = Math.max(0, totalExcelAprobados - entregadosExcelConActa);
+    const porcentajeExcel = totalExcelAprobados > 0 ? Number(((entregadosExcelConActa / totalExcelAprobados) * 100).toFixed(1)) : 0;
+
+    // DISTRIBUCIÓN POR NIVEL: Muestra exactamente los PENDIENTES DEL EXCEL
+    const distribucionNivel = Object.entries(pendientesPorNivelExcel).map(([nivel, cantidad]) => ({
+      nivel,
+      cantidad, // <-- PENDIENTES REALES DEL EXCEL
+    }));
+
+    const times = memoryStore.attentionTimes || [];
+    let avgAttentionSeconds = 0;
+    if (times.length > 0) {
+      avgAttentionSeconds = Math.round(times.reduce((a, b) => a + b, 0) / times.length);
+    }
 
     return res.json({
       message: "KPIs obtenidos correctamente.",
-      totalRegistros: totalBenefits,
-      totalEntregados: deliveredBenefits,
-      totalPendientes: pendingBenefits,
+      // Datos del padrón Excel real:
+      totalExcelAprobados,
+      totalBeneficiariosAprobados: totalExcelAprobados,
+      totalRegistros: totalExcelAprobados,
+      totalEntregados: entregadosExcelConActa,
+      entregadosConActa: entregadosExcelConActa,
+      totalPendientes: pendientesExcel,
+      pendientesDeRetiro: pendientesExcel,
       entregadosHoy: deliveriesToday,
-      porcentaje: percentage,
-      porDia: deliveriesByDay,
-      deliveriesByDay,
+      porcentaje: porcentajeExcel,
+      tiempoPromedioSegundos: avgAttentionSeconds,
+      // Gráficos alimentados por el Excel:
+      distribucionNivel,
+      distribucionSectores,
       deliveriesBySector,
-      kpis: {
-        totalGuardians,
-        totalStudents,
-        totalBenefits,
-        pendingBenefits,
-        deliveredBenefits,
-        deliveriesToday,
-        deliveryPercentage: percentage,
-      },
+      // Tabla de stock de control municipal:
+      stockPorNivel,
+      flujoPorHora,
+      porDia: [{ day: "Hoy", deliveries: deliveriesToday, total: deliveriesToday, fecha: todayStr }],
     });
   } catch (error) {
     return res.status(500).json({ message: "Error al calcular indicadores.", error: error.message });
@@ -157,7 +227,6 @@ async function exportTransparencyCsv(req, res) {
     }
 
     const csvContent = "\uFEFF" + [headers.join(","), ...rows.map((r) => r.join(","))].join("\r\n");
-
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader(
       "Content-Disposition",

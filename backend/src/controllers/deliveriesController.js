@@ -54,6 +54,14 @@ async function registerDelivery(req, res) {
     const syncStatus = req.body.sync_status || "SYNCED";
     const notes = String(req.body.notes || "Entrega física de beneficio").trim();
 
+    const durationSeconds = req.body.duration_seconds ? parseInt(req.body.duration_seconds, 10) : null;
+    if (durationSeconds && durationSeconds > 0 && durationSeconds < 7200) {
+      if (!memoryStore.attentionTimes) memoryStore.attentionTimes = [];
+      memoryStore.attentionTimes.push(durationSeconds);
+      // Mantener los últimos 200 registros de atención para promedio móvil
+      if (memoryStore.attentionTimes.length > 200) memoryStore.attentionTimes.shift();
+    }
+
     const extension = getImageExtension(req.file.mimetype);
     const fileHash = sha256(req.file.buffer);
     const deliveryDate = new Date().toISOString();
@@ -217,6 +225,7 @@ async function registerDelivery(req, res) {
         longitude,
         capturedAt,
         syncStatus,
+        durationSeconds,
         fileSizeKb: Math.round(req.file.size / 1024),
       },
       ipAddress,
