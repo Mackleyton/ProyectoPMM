@@ -262,7 +262,11 @@ async function getEvidenceFile(req, res) {
         [evId]
       );
       if (dbRes.rowCount > 0 && dbRes.rows[0].file_data) {
-        res.setHeader("Content-Type", dbRes.rows[0].mime_type || "image/jpeg");
+        const mimeType = dbRes.rows[0].mime_type || "image/jpeg";
+        const fileName = dbRes.rows[0].logical_file_name || `acta_${evId}.jpg`;
+        res.setHeader("Content-Type", mimeType);
+        res.setHeader("Content-Disposition", `inline; filename="${fileName}"`);
+        res.setHeader("Cache-Control", "public, max-age=86400");
         return res.send(dbRes.rows[0].file_data);
       }
     } catch (dbErr) {

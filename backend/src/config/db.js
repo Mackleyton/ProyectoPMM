@@ -230,6 +230,7 @@ async function syncDataToPostgres(client, parsedItems, replace = false) {
          guardian_id = EXCLUDED.guardian_id,
          status = CASE WHEN beneficiary_benefits.status = 'DELIVERED' THEN 'DELIVERED' ELSE EXCLUDED.status END,
          delivered_at = CASE WHEN beneficiary_benefits.status = 'DELIVERED' THEN beneficiary_benefits.delivered_at ELSE EXCLUDED.delivered_at END,
+         evidence_id = CASE WHEN beneficiary_benefits.status = 'DELIVERED' THEN beneficiary_benefits.evidence_id ELSE beneficiary_benefits.evidence_id END,
          updated_at = CURRENT_TIMESTAMP
        RETURNING id;`,
       [
