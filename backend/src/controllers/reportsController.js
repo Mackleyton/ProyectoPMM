@@ -1,3 +1,4 @@
+const xlsx = require("xlsx");
 const { pool, usePostgres, memoryStore } = require("../config/db");
 
 // Clasificación canónica de los 5 niveles oficiales
@@ -209,36 +210,114 @@ async function getKpis(req, res) {
   }
 }
 
-async function exportTransparencyCsv(req, res) {
-  try {
-    const headers = ["Sector", "Establecimiento", "Nivel_Educacional", "Estado_Entrega", "Fecha_Entrega"];
-    const rows = [];
+async function getDeliveredCountsByLevel() {
+  const counts = {
+    "PRE BÁSICA": { nivel: "PRE BÁSICA", tipoSet: "Set Escolar - Pre-Básica", cantidadEntregada: 0 },
+    "BÁSICA PRIMER CICLO (1° A 4° BÁSICO)": { nivel: "BÁSICA PRIMER CICLO (1° A 4° BÁSICO)", tipoSet: "Set Escolar - Básica 1er Ciclo", cantidadEntregada: 0 },
+    "BÁSICA SEGUNDO CICLO (5° A 8° BÁSICO)": { nivel: "BÁSICA SEGUNDO CICLO (5° A 8° BÁSICO)", tipoSet: "Set Escolar - Básica 2do Ciclo", cantidadEntregada: 0 },
+    "MEDIA": { nivel: "MEDIA", tipoSet: "Set Escolar - Enseñanza Media", cantidadEntregada: 0 },
+    "SUPERIOR": { nivel: "SUPERIOR", tipoSet: "Set Escolar - Educación Superior", cantidadEntregada: 0 },
+  };
 
-    for (const b of memoryStore.benefits.values()) {
-      const guardian = memoryStore.guardians.get(b.guardianRut);
-      const student = memoryStore.students.get(b.studentRut);
-      rows.push([
-        `"${(guardian && guardian.sector) || "CENTRO"}"`,
-        `"${(student && student.establishment) || "ESTABLECIMIENTO"}"`,
-        `"${(student && student.educationalLevel) || "GENERAL"}"`,
-        `"${b.status === "DELIVERED" ? "ENTREGADO" : "PENDIENTE"}"`,
-        `"${b.deliveredAt || ""}"`,
-      ]);
+  let hasData = false;
+
+  if (usePostgres) {
+    try {
+      const res = await pool.query(`
+        SELECT 
+          s.educational_level,
+          bt.name as benefit_name
+        FROM beneficiary_benefits bb
+        JOIN students s ON s.id = bb.student_id
+        LEFT JOIN benefit_types bt ON bt.id = bb.benefit_type_id
+        WHERE bb.status = 'DELIVERED'
+      `);
+
+      if (res.rowCount > 0) {
+        hasData = true;
+        res.rows.forEach((row) => {
+          const cat = categorizeLevel(row.educational_level);
+          if (counts[cat]) {
+            counts[cat].cantidadEntregada += 1;
+            if (row.benefit_name) {
+              counts[cat].tipoSet = row.benefit_name;
+            }
+          }
+        });
+      }
+    } catch (err) {
+      console.warn("[REPORTS] Error consultando conteo de entregas en Postgres:", err.message);
     }
-
-    const csvContent = "\uFEFF" + [headers.join(","), ...rows.map((r) => r.join(","))].join("\r\n");
-    res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="Reporte_Transparencia_Beneficios_Quilpue_${new Date().toISOString().slice(0, 10)}.csv"`
-    );
-    return res.send(csvContent);
-  } catch (error) {
-    return res.status(500).json({ message: "Error al generar CSV de transparencia.", error: error.message });
   }
+
+  if (!hasData && memoryStore.benefits.size > 0) {
+    for (const b of memoryStore.benefits.values()) {
+      if (b.status === "DELIVERED") {
+        const student = memoryStore.students.get(b.studentRut);
+        const cat = categorizeLevel(student ? student.educationalLevel : "");
+        if (counts[cat]) {
+          counts[cat].cantidadEntregada += 1;
+          if (b.name || b.benefitName) {
+            counts[cat].tipoSet = b.name || b.benefitName;
+          }
+        }
+      }
+    }
+  }
+
+  return counts;
+}
+
+async function exportTransparencyExcel(req, res) {
+  try {
+    const counts = await getDeliveredCountsByLevel();
+    const rows = Object.values(counts);
+    const totalEntregadas = rows.reduce((acc, curr) => acc + curr.cantidadEntregada, 0);
+
+    const worksheetData = [
+      ["REPORTE DE TRANSPARENCIA - ENTREGAS DE SETS ESCOLARES"],
+      [`Fecha de emisión: ${new Date().toLocaleDateString("es-CL")} ${new Date().toLocaleTimeString("es-CL")}`],
+      [],
+      ["NIVEL EDUCACIONAL", "TIPO DE SET", "CANTIDAD ENTREGADA"],
+    ];
+
+    rows.forEach((item) => {
+      worksheetData.push([item.nivel, item.tipoSet, item.cantidadEntregada]);
+    });
+
+    worksheetData.push(["TOTAL GENERAL", "", totalEntregadas]);
+
+    const worksheet = xlsx.utils.aoa_to_sheet(worksheetData);
+
+    worksheet["!cols"] = [
+      { wch: 42 },
+      { wch: 40 },
+      { wch: 22 },
+    ];
+
+    const workbook = xlsx.utils.book_new();
+    xlsx.utils.book_append_sheet(workbook, worksheet, "Cantidades Entregadas");
+
+    const excelBuffer = xlsx.write(workbook, { bookType: "xlsx", type: "buffer" });
+    const filename = `Reporte_Transparencia_Entregas_${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    return res.send(excelBuffer);
+  } catch (error) {
+    return res.status(500).json({ message: "Error al generar Excel de transparencia.", error: error.message });
+  }
+}
+
+async function exportTransparencyCsv(req, res) {
+  return exportTransparencyExcel(req, res);
 }
 
 module.exports = {
   getKpis,
   exportTransparencyCsv,
+  exportTransparencyExcel,
 };

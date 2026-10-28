@@ -122,11 +122,11 @@ export default function AdminDashboardPage() {
           <button
             type="button"
             className="btn btn-outline btn-sm"
-            onClick={() => apiService.exportarTransparenciaCSV?.()}
+            onClick={() => (apiService.exportarTransparenciaExcel ? apiService.exportarTransparenciaExcel() : apiService.exportarTransparenciaCSV?.())}
             title="Descargar reporte según Ley 21.180"
           >
             <FileDown size={15} />
-            <span>Exportar Ley de Transparencia</span>
+            <span>Exportar Ley de Transparencia (Excel)</span>
           </button>
           <button
             type="button"

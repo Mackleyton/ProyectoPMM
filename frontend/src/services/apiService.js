@@ -258,25 +258,29 @@ export const apiService = {
     return data.logs || [];
   },
 
-  async exportarTransparenciaCSV() {
-    const res = await fetch(`${API_BASE}/api/reports/transparency.csv`, {
+  async exportarTransparenciaExcel() {
+    const res = await fetch(`${API_BASE}/api/reports/transparency.xlsx`, {
       method: 'GET',
       headers: getAuthHeaders(),
     });
 
     if (!res.ok) {
-      throw new Error('Error al generar reporte de transparencia');
+      throw new Error('Error al generar reporte de transparencia en Excel');
     }
 
     const blob = await res.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Reporte_Transparencia_Quilpue_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `Reporte_Transparencia_Entregas_${new Date().toISOString().slice(0, 10)}.xlsx`;
     document.body.appendChild(a);
     a.click();
     window.URL.revokeObjectURL(url);
     a.remove();
+  },
+
+  async exportarTransparenciaCSV() {
+    return this.exportarTransparenciaExcel();
   },
 
   async crearUsuarioTerreno({ firstName, lastName, email, password }) {
