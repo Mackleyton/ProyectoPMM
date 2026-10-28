@@ -172,7 +172,7 @@ var require_excel = __commonJS({
     function getRowValue(rowMap, ...potentialKeys) {
       for (const k of potentialKeys) {
         const norm = normalizeHeaderName(k);
-        if (rowMap[norm] !== void 0 && rowMap[norm] !== "") {
+        if (rowMap[norm] !== void 0 && rowMap[norm] !== null && String(rowMap[norm]).trim() !== "") {
           return rowMap[norm];
         }
       }
@@ -181,13 +181,60 @@ var require_excel = __commonJS({
     function parseExcelBeneficiaries(bufferOrPath) {
       let workbook;
       if (Buffer.isBuffer(bufferOrPath)) {
-        workbook = xlsx.read(bufferOrPath, { type: "buffer" });
+        try {
+          workbook = xlsx.read(bufferOrPath, { type: "buffer", cellDates: true });
+        } catch {
+          const text = bufferOrPath.toString("utf8");
+          workbook = xlsx.read(text, { type: "string", cellDates: true });
+        }
       } else {
-        workbook = xlsx.readFile(bufferOrPath);
+        workbook = xlsx.readFile(bufferOrPath, { cellDates: true });
       }
-      const sheetName = workbook.SheetNames[0];
-      const firstSheet = workbook.Sheets[sheetName];
-      const rawRows = xlsx.utils.sheet_to_json(firstSheet, { defval: "" });
+      let firstSheet = null;
+      for (const name of workbook.SheetNames) {
+        const s = workbook.Sheets[name];
+        if (s && s["!ref"]) {
+          firstSheet = s;
+          break;
+        }
+      }
+      if (!firstSheet && workbook.SheetNames.length > 0) {
+        firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      }
+      if (!firstSheet) {
+        return { results: [], errors: [{ fila: 0, error: "La planilla no contiene hojas legibles" }], totalRows: 0 };
+      }
+      const matrix = xlsx.utils.sheet_to_json(firstSheet, { header: 1, defval: "" });
+      let headerRowIdx = -1;
+      const maxScan = Math.min(25, matrix.length);
+      for (let i = 0; i < maxScan; i++) {
+        const row = matrix[i];
+        if (!Array.isArray(row)) continue;
+        const rowStr = row.map((cell) => normalizeHeaderName(cell)).join(" ");
+        if ((rowStr.includes("rut") || rowStr.includes("run")) && (rowStr.includes("apoderado") || rowStr.includes("alumno") || rowStr.includes("estudiante") || rowStr.includes("nombre"))) {
+          headerRowIdx = i;
+          break;
+        }
+      }
+      let rawRows = [];
+      if (headerRowIdx !== -1) {
+        const headers = matrix[headerRowIdx].map((h) => String(h || "").trim());
+        for (let r = headerRowIdx + 1; r < matrix.length; r++) {
+          const rowArr = matrix[r];
+          if (!Array.isArray(rowArr) || rowArr.length === 0) continue;
+          const rowObj = {};
+          let hasData = false;
+          headers.forEach((h, colIdx) => {
+            if (!h) return;
+            const val = rowArr[colIdx] !== void 0 ? rowArr[colIdx] : "";
+            rowObj[h] = val;
+            if (String(val).trim()) hasData = true;
+          });
+          if (hasData) rawRows.push(rowObj);
+        }
+      } else {
+        rawRows = xlsx.utils.sheet_to_json(firstSheet, { defval: "" });
+      }
       const results = [];
       const errors = [];
       rawRows.forEach((row, idx) => {
@@ -195,8 +242,26 @@ var require_excel = __commonJS({
         for (const [key, value] of Object.entries(row)) {
           rowMap[normalizeHeaderName(key)] = value;
         }
-        const rawApoderado = getRowValue(rowMap, "rutapoderado", "rut_apoderado", "rut apoderado", "apoderadorut");
-        const rawAlumno = getRowValue(rowMap, "rutalumno", "rut_alumno", "rut alumno", "alumnorut");
+        const rawApoderado = getRowValue(
+          rowMap,
+          "rutapoderado",
+          "rut_apoderado",
+          "rut apoderado",
+          "runapoderado",
+          "run_apoderado",
+          "apoderadorut"
+        );
+        const rawAlumno = getRowValue(
+          rowMap,
+          "rutalumno",
+          "rut_alumno",
+          "rut alumno",
+          "runalumno",
+          "run_alumno",
+          "rutestudiante",
+          "rut_estudiante",
+          "alumnorut"
+        );
         if (!rawApoderado || !rawAlumno) {
           errors.push({ fila: idx + 2, error: "Faltan RUT de apoderado o RUT de alumno" });
           return;
@@ -289,7 +354,9 @@ var require_excel = __commonJS({
     module2.exports = {
       parseExcelBeneficiaries,
       parseExcelDate,
-      parseExcelTime
+      parseExcelTime,
+      normalizeHeaderName,
+      getRowValue
     };
   }
 });
@@ -343,6 +410,7 @@ var require_db = __commonJS({
       benefits: /* @__PURE__ */ new Map(),
       deliveries: /* @__PURE__ */ new Map(),
       evidences: /* @__PURE__ */ new Map(),
+      attentionTimes: [],
       auditLogs: []
     };
     function findInitialExcelFile() {
@@ -495,6 +563,7 @@ var require_db = __commonJS({
          guardian_id = EXCLUDED.guardian_id,
          status = CASE WHEN beneficiary_benefits.status = 'DELIVERED' THEN 'DELIVERED' ELSE EXCLUDED.status END,
          delivered_at = CASE WHEN beneficiary_benefits.status = 'DELIVERED' THEN beneficiary_benefits.delivered_at ELSE EXCLUDED.delivered_at END,
+         evidence_id = CASE WHEN beneficiary_benefits.status = 'DELIVERED' THEN beneficiary_benefits.evidence_id ELSE beneficiary_benefits.evidence_id END,
          updated_at = CURRENT_TIMESTAMP
        RETURNING id;`,
           [
@@ -767,9 +836,177 @@ var require_authController = __commonJS({
     async function getProfile(req, res) {
       return res.json({ user: req.user });
     }
+    async function getUsers(req, res) {
+      try {
+        let usersList = [];
+        if (usePostgres) {
+          try {
+            const dbRes = await pool.query(
+              "SELECT id, username, role, active, created_at FROM users ORDER BY created_at ASC"
+            );
+            usersList = dbRes.rows.map((u) => ({
+              id: u.id,
+              username: u.username,
+              name: u.username === "admin" ? "Administrador Social" : u.username === "terreno" ? "Operador Terreno" : u.username,
+              role: u.role,
+              active: u.active,
+              createdAt: u.created_at
+            }));
+          } catch (err) {
+            console.warn("[AUTH] Error consultando usuarios en PostgreSQL:", err.message);
+          }
+        }
+        if (usersList.length === 0) {
+          usersList = memoryStore.users.map((u) => ({
+            id: u.id,
+            username: u.username,
+            name: u.name || u.username,
+            role: u.role,
+            active: u.active,
+            createdAt: u.created_at || (/* @__PURE__ */ new Date()).toISOString()
+          }));
+        }
+        return res.json({ users: usersList });
+      } catch (error) {
+        return res.status(500).json({ message: "Error al listar usuarios.", error: error.message });
+      }
+    }
+    async function createUser(req, res) {
+      const ipAddress = req.ip || req.connection.remoteAddress || "127.0.0.1";
+      try {
+        const { firstName, lastName, email, password, role } = req.body;
+        if (!firstName || !email || !password) {
+          return res.status(400).json({ message: "Nombre, correo y contrase\xF1a son obligatorios." });
+        }
+        if (password.length < 6) {
+          return res.status(400).json({ message: "La contrase\xF1a debe tener al menos 6 caracteres." });
+        }
+        const assignedRole = role === "ADMIN" || role === "FIELD_AGENT" ? role : "FIELD_AGENT";
+        const cleanEmail = String(email).trim().toLowerCase();
+        const fullName = `${firstName.trim()} ${(lastName || "").trim()}`.trim();
+        const username = cleanEmail;
+        const passwordHash = await bcrypt.hash(password, 10);
+        let createdId = null;
+        if (usePostgres) {
+          try {
+            const checkRes = await pool.query("SELECT id FROM users WHERE username = $1 LIMIT 1", [username]);
+            if (checkRes.rowCount > 0) {
+              return res.status(400).json({ message: "Ya existe un usuario registrado con ese correo o nombre de usuario." });
+            }
+            const insRes = await pool.query(
+              `INSERT INTO users (username, password_hash, role, active)
+           VALUES ($1, $2, $3, TRUE) RETURNING id`,
+              [username, passwordHash, assignedRole]
+            );
+            createdId = insRes.rows[0]?.id;
+          } catch (dbErr) {
+            console.warn("[AUTH] Error creando usuario en PostgreSQL:", dbErr.message);
+          }
+        }
+        const existsInMem = memoryStore.users.some((u) => u.username.toLowerCase() === username);
+        if (existsInMem && !createdId) {
+          return res.status(400).json({ message: "Ya existe un usuario registrado con ese correo o nombre de usuario." });
+        }
+        const newUser = {
+          id: createdId || `u-${assignedRole.toLowerCase()}-${Date.now()}`,
+          username,
+          password_hash: passwordHash,
+          role: assignedRole,
+          name: fullName,
+          email: cleanEmail,
+          active: true,
+          created_at: (/* @__PURE__ */ new Date()).toISOString()
+        };
+        if (!existsInMem) {
+          memoryStore.users.push(newUser);
+        }
+        await recordAuditLog({
+          userId: req.user?.id,
+          username: req.user?.username || "admin",
+          action: assignedRole === "ADMIN" ? "USER_CREATE_ADMIN" : "USER_CREATE_FIELD_AGENT",
+          details: { createdUsername: username, fullName, role: assignedRole },
+          ipAddress
+        });
+        return res.status(201).json({
+          message: `Usuario ${assignedRole === "ADMIN" ? "Administrador" : "de Terreno"} creado exitosamente para ${fullName}.`,
+          user: {
+            id: newUser.id,
+            username,
+            name: fullName,
+            role: assignedRole
+          }
+        });
+      } catch (error) {
+        return res.status(500).json({ message: "Error al crear usuario.", error: error.message });
+      }
+    }
+    async function createFieldUser(req, res) {
+      req.body.role = "FIELD_AGENT";
+      return createUser(req, res);
+    }
+    async function deleteUser(req, res) {
+      const ipAddress = req.ip || req.connection.remoteAddress || "127.0.0.1";
+      try {
+        const { id } = req.params;
+        if (!id) {
+          return res.status(400).json({ message: "ID de usuario requerido." });
+        }
+        if (req.user?.id && String(req.user.id) === String(id)) {
+          return res.status(400).json({ message: "No puedes eliminar tu propia cuenta en sesi\xF3n activa." });
+        }
+        let deletedUsername = "";
+        if (usePostgres) {
+          try {
+            const checkRes = await pool.query("SELECT id, username, role FROM users WHERE id::text = $1 OR username = $1", [id]);
+            if (checkRes.rowCount > 0) {
+              const userToDelete = checkRes.rows[0];
+              deletedUsername = userToDelete.username;
+              if (userToDelete.username === "admin") {
+                return res.status(400).json({ message: "El usuario administrador principal ('admin') no puede ser eliminado." });
+              }
+              if (userToDelete.role === "ADMIN") {
+                const adminCount = await pool.query("SELECT COUNT(*) FROM users WHERE role = 'ADMIN' AND active = TRUE");
+                if (parseInt(adminCount.rows[0].count, 10) <= 1) {
+                  return res.status(400).json({ message: "No puedes eliminar al \xFAnico administrador del sistema." });
+                }
+              }
+              await pool.query("DELETE FROM users WHERE id = $1", [userToDelete.id]);
+            }
+          } catch (dbErr) {
+            console.warn("[AUTH] Error eliminando usuario en PostgreSQL:", dbErr.message);
+          }
+        }
+        const memIdx = memoryStore.users.findIndex((u) => u.id === id || u.username === id);
+        if (memIdx !== -1) {
+          const u = memoryStore.users[memIdx];
+          if (u.username === "admin") {
+            return res.status(400).json({ message: "El usuario administrador principal ('admin') no puede ser eliminado." });
+          }
+          deletedUsername = deletedUsername || u.username;
+          memoryStore.users.splice(memIdx, 1);
+        }
+        await recordAuditLog({
+          userId: req.user?.id,
+          username: req.user?.username || "admin",
+          action: "USER_DELETE",
+          details: { deletedUserId: id, deletedUsername },
+          ipAddress
+        });
+        return res.json({
+          message: `Usuario ${deletedUsername || id} eliminado correctamente.`,
+          deletedId: id
+        });
+      } catch (error) {
+        return res.status(500).json({ message: "Error al eliminar usuario.", error: error.message });
+      }
+    }
     module2.exports = {
       login,
-      getProfile
+      getProfile,
+      getUsers,
+      createUser,
+      createFieldUser,
+      deleteUser
     };
   }
 });
@@ -815,11 +1052,15 @@ var require_authRoutes = __commonJS({
   "src/routes/authRoutes.js"(exports2, module2) {
     var express = require("express");
     var router = express.Router();
-    var { login, getProfile } = require_authController();
-    var { authenticateToken } = require_auth();
+    var { login, getProfile, getUsers, createUser, createFieldUser, deleteUser } = require_authController();
+    var { authenticateToken, requireRoles } = require_auth();
     var { loginLimiter } = require_rateLimit();
     router.post("/login", loginLimiter, login);
     router.get("/me", authenticateToken, getProfile);
+    router.get("/users", authenticateToken, requireRoles("ADMIN"), getUsers);
+    router.post("/users", authenticateToken, requireRoles("ADMIN"), createUser);
+    router.delete("/users/:id", authenticateToken, requireRoles("ADMIN"), deleteUser);
+    router.post("/create-field-user", authenticateToken, requireRoles("ADMIN"), createFieldUser);
     module2.exports = router;
   }
 });
@@ -1145,6 +1386,12 @@ var require_deliveriesController = __commonJS({
         const capturedAt = req.body.captured_at || (/* @__PURE__ */ new Date()).toISOString();
         const syncStatus = req.body.sync_status || "SYNCED";
         const notes = String(req.body.notes || "Entrega f\xEDsica de beneficio").trim();
+        const durationSeconds = req.body.duration_seconds ? parseInt(req.body.duration_seconds, 10) : null;
+        if (durationSeconds && durationSeconds > 0 && durationSeconds < 7200) {
+          if (!memoryStore.attentionTimes) memoryStore.attentionTimes = [];
+          memoryStore.attentionTimes.push(durationSeconds);
+          if (memoryStore.attentionTimes.length > 200) memoryStore.attentionTimes.shift();
+        }
         const extension = getImageExtension(req.file.mimetype);
         const fileHash = sha256(req.file.buffer);
         const deliveryDate = (/* @__PURE__ */ new Date()).toISOString();
@@ -1289,6 +1536,7 @@ var require_deliveriesController = __commonJS({
             longitude,
             capturedAt,
             syncStatus,
+            durationSeconds,
             fileSizeKb: Math.round(req.file.size / 1024)
           },
           ipAddress
@@ -1322,7 +1570,11 @@ var require_deliveriesController = __commonJS({
             [evId]
           );
           if (dbRes.rowCount > 0 && dbRes.rows[0].file_data) {
-            res.setHeader("Content-Type", dbRes.rows[0].mime_type || "image/jpeg");
+            const mimeType = dbRes.rows[0].mime_type || "image/jpeg";
+            const fileName = dbRes.rows[0].logical_file_name || `acta_${evId}.jpg`;
+            res.setHeader("Content-Type", mimeType);
+            res.setHeader("Content-Disposition", `inline; filename="${fileName}"`);
+            res.setHeader("Cache-Control", "public, max-age=86400");
             return res.send(dbRes.rows[0].file_data);
           }
         } catch (dbErr) {
@@ -1365,166 +1617,320 @@ var require_deliveriesRoutes = __commonJS({
   }
 });
 
+// src/utils/timezone.js
+var require_timezone = __commonJS({
+  "src/utils/timezone.js"(exports2, module2) {
+    var CHILE_TZ = "America/Santiago";
+    function getChileDateString(date = /* @__PURE__ */ new Date()) {
+      const d = date instanceof Date ? date : new Date(date);
+      if (isNaN(d.getTime())) return "";
+      return new Intl.DateTimeFormat("en-CA", {
+        timeZone: CHILE_TZ,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+      }).format(d);
+    }
+    function getChileHour(date = /* @__PURE__ */ new Date()) {
+      const d = date instanceof Date ? date : new Date(date);
+      if (isNaN(d.getTime())) return 0;
+      const hourStr = new Intl.DateTimeFormat("en-US", {
+        timeZone: CHILE_TZ,
+        hour: "numeric",
+        hour12: false
+      }).format(d);
+      const hourNum = parseInt(hourStr, 10);
+      return hourNum === 24 ? 0 : hourNum;
+    }
+    function getChileDateTimeString(date = /* @__PURE__ */ new Date()) {
+      const d = date instanceof Date ? date : new Date(date);
+      if (isNaN(d.getTime())) return "";
+      return d.toLocaleString("es-CL", { timeZone: CHILE_TZ });
+    }
+    module2.exports = {
+      CHILE_TZ,
+      getChileDateString,
+      getChileHour,
+      getChileDateTimeString
+    };
+  }
+});
+
 // src/controllers/reportsController.js
 var require_reportsController = __commonJS({
   "src/controllers/reportsController.js"(exports2, module2) {
+    var { getChileDateString, getChileHour, getChileDateTimeString } = require_timezone();
+    var xlsx = require("xlsx");
     var { pool, usePostgres, memoryStore } = require_db();
+    function categorizeLevel(lvl) {
+      const s = String(lvl || "").toLowerCase();
+      if (s.includes("pre") || s.includes("kinder") || s.includes("k\xEDnder")) {
+        return "PRE B\xC1SICA";
+      }
+      if (s.includes("superior") || s.includes("universitaria") || s.includes("instituto") || s.includes("cft")) {
+        return "SUPERIOR";
+      }
+      if (s.includes("media") || s.includes("secundaria")) {
+        return "MEDIA";
+      }
+      if (s.includes("segundo") || s.includes("5") || s.includes("6") || s.includes("7") || s.includes("8")) {
+        return "B\xC1SICA SEGUNDO CICLO (5\xB0 A 8\xB0 B\xC1SICO)";
+      }
+      return "B\xC1SICA PRIMER CICLO (1\xB0 A 4\xB0 B\xC1SICO)";
+    }
+    function isApproved(status) {
+      const s = String(status || "").trim().toUpperCase();
+      return s.startsWith("APROB");
+    }
     async function getKpis(req, res) {
       try {
-        let totalGuardians = 0;
-        let totalStudents = 0;
-        let totalBenefits = 0;
-        let deliveredBenefits = 0;
-        let pendingBenefits = 0;
         let deliveriesToday = 0;
         let deliveriesByDay = [];
         let deliveriesBySector = [];
+        let distribucionSectores = [];
+        let flujoPorHora = [
+          { rango: "08:00 - 11:00", cantidad: 0 },
+          { rango: "11:00 - 14:00", cantidad: 0 },
+          { rango: "14:00 - 17:00", cantidad: 0 },
+          { rango: "17:00+", cantidad: 0 }
+        ];
+        const stockMap = {
+          "PRE B\xC1SICA": { nivel: "PRE B\xC1SICA", licitacion: 800, inicial: 490, entregadas: 0, saldo: 490, pct: 0 },
+          "B\xC1SICA PRIMER CICLO (1\xB0 A 4\xB0 B\xC1SICO)": { nivel: "B\xC1SICA PRIMER CICLO (1\xB0 A 4\xB0 B\xC1SICO)", licitacion: 1700, inicial: 1443, entregadas: 0, saldo: 1443, pct: 0 },
+          "B\xC1SICA SEGUNDO CICLO (5\xB0 A 8\xB0 B\xC1SICO)": { nivel: "B\xC1SICA SEGUNDO CICLO (5\xB0 A 8\xB0 B\xC1SICO)", licitacion: 1700, inicial: 1569, entregadas: 0, saldo: 1569, pct: 0 },
+          "MEDIA": { nivel: "MEDIA", licitacion: 1500, inicial: 1124, entregadas: 0, saldo: 1124, pct: 0 },
+          "SUPERIOR": { nivel: "SUPERIOR", licitacion: 700, inicial: 419, entregadas: 0, saldo: 419, pct: 0 }
+        };
+        const pendientesPorNivelExcel = {
+          "PRE B\xC1SICA": 0,
+          "B\xC1SICA PRIMER CICLO (1\xB0 A 4\xB0 B\xC1SICO)": 0,
+          "B\xC1SICA SEGUNDO CICLO (5\xB0 A 8\xB0 B\xC1SICO)": 0,
+          "MEDIA": 0,
+          "SUPERIOR": 0
+        };
+        const sectorCounter = {};
+        let totalExcelAprobados = 0;
+        let entregadosExcelConActa = 0;
+        const todayStr = getChileDateString();
         if (usePostgres) {
           try {
-            const statsRes = await pool.query(`
-          SELECT
-            COUNT(DISTINCT bb.guardian_id)::int AS total_guardians,
-            COUNT(DISTINCT bb.student_id)::int AS total_students,
-            COUNT(*)::int AS total_benefits,
-            COUNT(*) FILTER (WHERE bb.status = 'DELIVERED')::int AS delivered_benefits,
-            COUNT(*) FILTER (WHERE bb.status != 'DELIVERED' OR bb.status IS NULL)::int AS pending_benefits,
-            COUNT(*) FILTER (WHERE bb.status = 'DELIVERED' AND (DATE(bb.delivered_at) = CURRENT_DATE OR DATE(bb.delivered_at AT TIME ZONE 'America/Santiago') = CURRENT_DATE))::int AS deliveries_today
-          FROM beneficiary_benefits bb
+            const studentsRes = await pool.query(`
+          SELECT 
+            s.id,
+            s.educational_level,
+            COALESCE(g.sector, 'CENTRO') AS sector,
+            bb.status,
+            bb.delivered_at
+          FROM students s
+          JOIN guardians g ON g.id = s.guardian_id
+          LEFT JOIN beneficiary_benefits bb ON bb.student_id = s.id
+          WHERE UPPER(COALESCE(s.state, 'APROBADA')) LIKE 'APROB%'
         `);
-            if (statsRes.rowCount > 0 && Number(statsRes.rows[0].total_benefits) > 0) {
-              const row = statsRes.rows[0];
-              totalGuardians = Number(row.total_guardians) || 0;
-              totalStudents = Number(row.total_students) || 0;
-              totalBenefits = Number(row.total_benefits) || 0;
-              deliveredBenefits = Number(row.delivered_benefits) || 0;
-              pendingBenefits = Number(row.pending_benefits) || 0;
-              deliveriesToday = Number(row.deliveries_today) || 0;
-              const sectorRes = await pool.query(`
-            SELECT 
-              COALESCE(g.sector, 'Centro') AS sector,
-              COUNT(bb.id)::int AS deliveries
-            FROM beneficiary_benefits bb
-            JOIN guardians g ON g.id = bb.guardian_id
-            WHERE bb.status = 'DELIVERED'
-            GROUP BY COALESCE(g.sector, 'Centro')
-            ORDER BY deliveries DESC
-          `);
-              if (sectorRes.rowCount > 0) {
-                deliveriesBySector = sectorRes.rows.map((r) => ({
-                  sector: r.sector,
-                  deliveries: Number(r.deliveries)
-                }));
+            studentsRes.rows.forEach((row) => {
+              totalExcelAprobados++;
+              const cat = categorizeLevel(row.educational_level);
+              const isDelivered = row.status === "DELIVERED";
+              if (isDelivered) {
+                entregadosExcelConActa++;
+                if (stockMap[cat]) stockMap[cat].entregadas += 1;
+                if (row.delivered_at) {
+                  const d = new Date(row.delivered_at);
+                  if (d.toISOString().slice(0, 10) === todayStr) deliveriesToday++;
+                  const h = d.getHours();
+                  if (h >= 8 && h < 11) flujoPorHora[0].cantidad++;
+                  else if (h >= 11 && h < 14) flujoPorHora[1].cantidad++;
+                  else if (h >= 14 && h < 17) flujoPorHora[2].cantidad++;
+                  else flujoPorHora[3].cantidad++;
+                }
+              } else {
+                if (pendientesPorNivelExcel[cat] !== void 0) {
+                  pendientesPorNivelExcel[cat]++;
+                }
               }
-              const daysRes = await pool.query(`
-            SELECT 
-              TO_CHAR(bb.delivered_at, 'YYYY-MM-DD') AS fecha,
-              TO_CHAR(bb.delivered_at, 'Day') AS dia_nombre,
-              COUNT(bb.id)::int AS total
-            FROM beneficiary_benefits bb
-            WHERE bb.status = 'DELIVERED' AND bb.delivered_at IS NOT NULL
-            GROUP BY TO_CHAR(bb.delivered_at, 'YYYY-MM-DD'), TO_CHAR(bb.delivered_at, 'Day')
-            ORDER BY fecha ASC
-            LIMIT 14
-          `);
-              if (daysRes.rowCount > 0) {
-                deliveriesByDay = daysRes.rows.map((r) => ({
-                  day: r.dia_nombre ? r.dia_nombre.trim() : r.fecha,
-                  deliveries: Number(r.total),
-                  total: Number(r.total),
-                  fecha: r.fecha
-                }));
-              }
-            }
+              const sec = String(row.sector || "CENTRO").trim().toUpperCase();
+              sectorCounter[sec] = (sectorCounter[sec] || 0) + 1;
+            });
           } catch (dbErr) {
             console.warn("[REPORTS] Error consultando PostgreSQL:", dbErr.message);
           }
         }
-        if (totalBenefits === 0) {
-          totalGuardians = memoryStore.guardians.size;
-          totalStudents = memoryStore.students.size;
-          totalBenefits = memoryStore.benefits.size;
-          deliveredBenefits = 0;
-          pendingBenefits = 0;
-          for (const b of memoryStore.benefits.values()) {
-            if (b.status === "DELIVERED") deliveredBenefits++;
-            else pendingBenefits++;
-          }
-          const todayStr = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-          deliveriesToday = 0;
-          for (const b of memoryStore.benefits.values()) {
-            if (b.status === "DELIVERED" && b.deliveredAt && b.deliveredAt.startsWith(todayStr)) {
-              deliveriesToday++;
+        if (totalExcelAprobados === 0 && memoryStore.students.size > 0) {
+          for (const student of memoryStore.students.values()) {
+            const studentState = student.state || student.applicationStatus || "APROBADA";
+            if (!isApproved(studentState)) continue;
+            totalExcelAprobados++;
+            const cat = categorizeLevel(student.educationalLevel);
+            const guardian = memoryStore.guardians.get(student.guardianRut);
+            const sector = String(guardian && guardian.sector || "CENTRO").trim().toUpperCase();
+            sectorCounter[sector] = (sectorCounter[sector] || 0) + 1;
+            const cleanRutKey = student.rut.replace(/[^0-9kK]/g, "");
+            const benefitId = `b-xl-${cleanRutKey}`;
+            let b = memoryStore.benefits.get(benefitId);
+            if (!b) {
+              b = Array.from(memoryStore.benefits.values()).find((item) => item.studentRut === student.rut);
+            }
+            const isDelivered = b && b.status === "DELIVERED";
+            if (isDelivered) {
+              entregadosExcelConActa++;
+              if (stockMap[cat]) stockMap[cat].entregadas += 1;
+              if (b.deliveredAt && String(b.deliveredAt).startsWith(todayStr)) deliveriesToday++;
+              if (b.deliveredAt) {
+                const h = new Date(b.deliveredAt).getHours();
+                if (h >= 8 && h < 11) flujoPorHora[0].cantidad++;
+                else if (h >= 11 && h < 14) flujoPorHora[1].cantidad++;
+                else if (h >= 14 && h < 17) flujoPorHora[2].cantidad++;
+                else flujoPorHora[3].cantidad++;
+              }
+            } else {
+              if (pendientesPorNivelExcel[cat] !== void 0) {
+                pendientesPorNivelExcel[cat]++;
+              }
             }
           }
         }
-        if (deliveriesBySector.length === 0) {
-          deliveriesBySector = [
-            { sector: "Belloto Norte", deliveries: deliveredBenefits > 0 ? Math.round(deliveredBenefits * 0.25) : 0 },
-            { sector: "Belloto Sur", deliveries: deliveredBenefits > 0 ? Math.round(deliveredBenefits * 0.2) : 0 },
-            { sector: "Quilpu\xE9 Centro", deliveries: deliveredBenefits > 0 ? Math.round(deliveredBenefits * 0.35) : 0 },
-            { sector: "Canal Chacao", deliveries: deliveredBenefits > 0 ? Math.round(deliveredBenefits * 0.1) : 0 },
-            { sector: "Pompeya", deliveries: deliveredBenefits > 0 ? Math.round(deliveredBenefits * 0.1) : 0 }
-          ];
+        distribucionSectores = Object.entries(sectorCounter).map(([sector, cantidad]) => ({
+          sector,
+          cantidad,
+          deliveries: cantidad
+        }));
+        deliveriesBySector = distribucionSectores;
+        const stockPorNivel = Object.values(stockMap).map((item) => {
+          const saldo = Math.max(0, item.inicial - item.entregadas);
+          const pct = item.inicial > 0 ? Math.round(item.entregadas / item.inicial * 100) : 0;
+          return { ...item, saldo, pct };
+        });
+        const pendientesExcel = Math.max(0, totalExcelAprobados - entregadosExcelConActa);
+        const porcentajeExcel = totalExcelAprobados > 0 ? Number((entregadosExcelConActa / totalExcelAprobados * 100).toFixed(1)) : 0;
+        const distribucionNivel = Object.entries(pendientesPorNivelExcel).map(([nivel, cantidad]) => ({
+          nivel,
+          cantidad
+          // <-- PENDIENTES REALES DEL EXCEL
+        }));
+        const times = memoryStore.attentionTimes || [];
+        let avgAttentionSeconds = 0;
+        if (times.length > 0) {
+          avgAttentionSeconds = Math.round(times.reduce((a, b) => a + b, 0) / times.length);
         }
-        if (deliveriesByDay.length === 0) {
-          deliveriesByDay = [
-            { day: "Hoy", deliveries: deliveriesToday, total: deliveriesToday, fecha: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) }
-          ];
-        }
-        const percentage = totalBenefits > 0 ? Number((deliveredBenefits / totalBenefits * 100).toFixed(1)) : 0;
         return res.json({
           message: "KPIs obtenidos correctamente.",
-          totalRegistros: totalBenefits,
-          totalEntregados: deliveredBenefits,
-          totalPendientes: pendingBenefits,
+          // Datos del padrón Excel real:
+          totalExcelAprobados,
+          totalBeneficiariosAprobados: totalExcelAprobados,
+          totalRegistros: totalExcelAprobados,
+          totalEntregados: entregadosExcelConActa,
+          entregadosConActa: entregadosExcelConActa,
+          totalPendientes: pendientesExcel,
+          pendientesDeRetiro: pendientesExcel,
           entregadosHoy: deliveriesToday,
-          porcentaje: percentage,
-          porDia: deliveriesByDay,
-          deliveriesByDay,
+          porcentaje: porcentajeExcel,
+          tiempoPromedioSegundos: avgAttentionSeconds,
+          // Gráficos alimentados por el Excel:
+          distribucionNivel,
+          distribucionSectores,
           deliveriesBySector,
-          kpis: {
-            totalGuardians,
-            totalStudents,
-            totalBenefits,
-            pendingBenefits,
-            deliveredBenefits,
-            deliveriesToday,
-            deliveryPercentage: percentage
-          }
+          // Tabla de stock de control municipal:
+          stockPorNivel,
+          flujoPorHora,
+          porDia: [{ day: "Hoy", deliveries: deliveriesToday, total: deliveriesToday, fecha: todayStr }]
         });
       } catch (error) {
         return res.status(500).json({ message: "Error al calcular indicadores.", error: error.message });
       }
     }
-    async function exportTransparencyCsv(req, res) {
-      try {
-        const headers = ["Sector", "Establecimiento", "Nivel_Educacional", "Estado_Entrega", "Fecha_Entrega"];
-        const rows = [];
-        for (const b of memoryStore.benefits.values()) {
-          const guardian = memoryStore.guardians.get(b.guardianRut);
-          const student = memoryStore.students.get(b.studentRut);
-          rows.push([
-            `"${guardian && guardian.sector || "CENTRO"}"`,
-            `"${student && student.establishment || "ESTABLECIMIENTO"}"`,
-            `"${student && student.educationalLevel || "GENERAL"}"`,
-            `"${b.status === "DELIVERED" ? "ENTREGADO" : "PENDIENTE"}"`,
-            `"${b.deliveredAt || ""}"`
-          ]);
+    async function getDeliveredCountsByLevel() {
+      const counts = {
+        "PRE B\xC1SICA": { nivel: "PRE B\xC1SICA", tipoSet: "Set Escolar - Pre-B\xE1sica", cantidadEntregada: 0 },
+        "B\xC1SICA PRIMER CICLO (1\xB0 A 4\xB0 B\xC1SICO)": { nivel: "B\xC1SICA PRIMER CICLO (1\xB0 A 4\xB0 B\xC1SICO)", tipoSet: "Set Escolar - B\xE1sica 1er Ciclo", cantidadEntregada: 0 },
+        "B\xC1SICA SEGUNDO CICLO (5\xB0 A 8\xB0 B\xC1SICO)": { nivel: "B\xC1SICA SEGUNDO CICLO (5\xB0 A 8\xB0 B\xC1SICO)", tipoSet: "Set Escolar - B\xE1sica 2do Ciclo", cantidadEntregada: 0 },
+        "MEDIA": { nivel: "MEDIA", tipoSet: "Set Escolar - Ense\xF1anza Media", cantidadEntregada: 0 },
+        "SUPERIOR": { nivel: "SUPERIOR", tipoSet: "Set Escolar - Educaci\xF3n Superior", cantidadEntregada: 0 }
+      };
+      let hasData = false;
+      if (usePostgres) {
+        try {
+          const res = await pool.query(`
+        SELECT 
+          s.educational_level,
+          bt.name as benefit_name
+        FROM beneficiary_benefits bb
+        JOIN students s ON s.id = bb.student_id
+        LEFT JOIN benefit_types bt ON bt.id = bb.benefit_type_id
+        WHERE bb.status = 'DELIVERED'
+      `);
+          if (res.rowCount > 0) {
+            hasData = true;
+            res.rows.forEach((row) => {
+              const cat = categorizeLevel(row.educational_level);
+              if (counts[cat]) {
+                counts[cat].cantidadEntregada += 1;
+                if (row.benefit_name) {
+                  counts[cat].tipoSet = row.benefit_name;
+                }
+              }
+            });
+          }
+        } catch (err) {
+          console.warn("[REPORTS] Error consultando conteo de entregas en Postgres:", err.message);
         }
-        const csvContent = "\uFEFF" + [headers.join(","), ...rows.map((r) => r.join(","))].join("\r\n");
-        res.setHeader("Content-Type", "text/csv; charset=utf-8");
-        res.setHeader(
-          "Content-Disposition",
-          `attachment; filename="Reporte_Transparencia_Beneficios_Quilpue_${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.csv"`
-        );
-        return res.send(csvContent);
-      } catch (error) {
-        return res.status(500).json({ message: "Error al generar CSV de transparencia.", error: error.message });
       }
+      if (!hasData && memoryStore.benefits.size > 0) {
+        for (const b of memoryStore.benefits.values()) {
+          if (b.status === "DELIVERED") {
+            const student = memoryStore.students.get(b.studentRut);
+            const cat = categorizeLevel(student ? student.educationalLevel : "");
+            if (counts[cat]) {
+              counts[cat].cantidadEntregada += 1;
+              if (b.name || b.benefitName) {
+                counts[cat].tipoSet = b.name || b.benefitName;
+              }
+            }
+          }
+        }
+      }
+      return counts;
+    }
+    async function exportTransparencyExcel(req, res) {
+      try {
+        const counts = await getDeliveredCountsByLevel();
+        const rows = Object.values(counts);
+        const totalEntregadas = rows.reduce((acc, curr) => acc + curr.cantidadEntregada, 0);
+        const worksheetData = [
+          ["REPORTE DE TRANSPARENCIA - ENTREGAS DE SETS ESCOLARES"],
+          [`Fecha de emisi\xF3n (Chile): ${getChileDateTimeString()}`],
+          [],
+          ["NIVEL EDUCACIONAL", "TIPO DE SET", "CANTIDAD ENTREGADA"]
+        ];
+        rows.forEach((item) => {
+          worksheetData.push([item.nivel, item.tipoSet, item.cantidadEntregada]);
+        });
+        worksheetData.push(["TOTAL GENERAL", "", totalEntregadas]);
+        const worksheet = xlsx.utils.aoa_to_sheet(worksheetData);
+        worksheet["!cols"] = [
+          { wch: 42 },
+          { wch: 40 },
+          { wch: 22 }
+        ];
+        const workbook = xlsx.utils.book_new();
+        xlsx.utils.book_append_sheet(workbook, worksheet, "Cantidades Entregadas");
+        const excelBuffer = xlsx.write(workbook, { bookType: "xlsx", type: "buffer" });
+        const filename = `Reporte_Transparencia_Entregas_${getChileDateString()}.xlsx`;
+        res.setHeader(
+          "Content-Type",
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        );
+        res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+        return res.send(excelBuffer);
+      } catch (error) {
+        return res.status(500).json({ message: "Error al generar Excel de transparencia.", error: error.message });
+      }
+    }
+    async function exportTransparencyCsv(req, res) {
+      return exportTransparencyExcel(req, res);
     }
     module2.exports = {
       getKpis,
-      exportTransparencyCsv
+      exportTransparencyCsv,
+      exportTransparencyExcel
     };
   }
 });
@@ -1534,10 +1940,11 @@ var require_reportsRoutes = __commonJS({
   "src/routes/reportsRoutes.js"(exports2, module2) {
     var express = require("express");
     var router = express.Router();
-    var { getKpis, exportTransparencyCsv } = require_reportsController();
+    var { getKpis, exportTransparencyCsv, exportTransparencyExcel } = require_reportsController();
     var { authenticateToken, requireRoles } = require_auth();
     router.get("/reports/kpis", authenticateToken, getKpis);
     router.get("/reports/transparency.csv", authenticateToken, requireRoles("ADMIN"), exportTransparencyCsv);
+    router.get("/reports/transparency.xlsx", authenticateToken, requireRoles("ADMIN"), exportTransparencyExcel);
     module2.exports = router;
   }
 });
@@ -1555,14 +1962,14 @@ var require_importController = __commonJS({
       const ipAddress = req.ip || req.connection.remoteAddress || "127.0.0.1";
       try {
         if (!req.file) {
-          return res.status(400).json({ message: "Debes adjuntar un archivo de planilla Excel (.xlsx o .xls)." });
+          return res.status(400).json({ message: "Debes adjuntar un archivo de planilla (.xlsx, .xls o .csv)." });
         }
         const mode = String(req.body.mode || req.query.mode || "update").toLowerCase();
         const isReplace = mode === "replace";
         const { results, errors, totalRows } = parseExcelBeneficiaries(req.file.buffer);
         if (results.length === 0) {
           return res.status(400).json({
-            message: "No se pudieron procesar registros v\xE1lidos del archivo Excel.",
+            message: "No se pudieron procesar registros v\xE1lidos del archivo Excel o CSV.",
             errors
           });
         }
@@ -1623,37 +2030,28 @@ var require_importController = __commonJS({
           }
         }
         try {
-          const destFile = path.join(__dirname, "..", "..", "data", "formulario_postulantes.xlsx");
+          const destDir = path.join(__dirname, "..", "..", "data");
+          if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+          const destFile = path.join(destDir, "formulario_postulantes.xlsx");
           fs.writeFileSync(destFile, req.file.buffer);
         } catch (saveErr) {
           console.warn("[IMPORT] No se pudo guardar copia local de respaldo:", saveErr.message);
         }
-        const auditAction = isReplace ? "IMPORT_EXCEL_REPLACE" : "IMPORT_EXCEL_UPDATE";
         await recordAuditLog({
-          userId: req.user?.id,
-          username: req.user?.username || "admin",
-          action: auditAction,
-          entityType: "EXCEL_IMPORT",
-          details: {
-            fileName: req.file.originalname,
-            mode: isReplace ? "REEMPLAZO_TOTAL" : "ACTUALIZACION_INCREMENTAL",
-            totalRows,
-            importedRows: results.length,
-            rejectedRows: errors.length
-          },
+          action: isReplace ? "IMPORT_REPLACE" : "IMPORT_UPDATE",
+          performedBy: req.user?.username || "admin",
+          details: `Importaci\xF3n masiva: ${results.length} beneficiarios procesados desde ${req.file.originalname}`,
           ipAddress
         });
         return res.json({
-          ok: true,
-          mode: isReplace ? "REEMPLAZO_TOTAL" : "ACTUALIZACION_INCREMENTAL",
-          message: isReplace ? `N\xF3mina reemplazada exitosamente. Se cargaron ${results.length} beneficiarios nuevos.` : `N\xF3mina actualizada exitosamente. Se procesaron ${results.length} beneficiarios conservando entregas previas.`,
-          batchId: `batch-${Date.now()}`,
+          message: "Planilla procesada e importada correctamente.",
           totalRows,
           importedRows: results.length,
           rejectedRows: errors.length,
           errors: errors.slice(0, 10)
         });
       } catch (error) {
+        console.error("[IMPORT] Error inesperado:", error);
         return res.status(500).json({ message: "Error al importar planilla.", error: error.message });
       }
     }
@@ -1694,6 +2092,48 @@ var require_importController = __commonJS({
           message: "Base de datos y actas f\xEDsicas reseteadas exitosamente."
         });
       } catch (error) {
+        console.error("[RESET_DB] Error:", error);
+        return res.status(500).json({ message: "Error al reiniciar la base de datos.", error: error.message });
+      }
+    }
+    async function resetDatabase(req, res) {
+      const ipAddress = req.ip || req.connection.remoteAddress || "127.0.0.1";
+      try {
+        const uploadsDir = path.join(__dirname, "..", "..", "uploads", "actas");
+        if (fs.existsSync(uploadsDir)) {
+          const files = fs.readdirSync(uploadsDir);
+          for (const f of files) {
+            const fullPath = path.join(uploadsDir, f);
+            if (fs.statSync(fullPath).isFile()) {
+              fs.unlinkSync(fullPath);
+            }
+          }
+        }
+        if (usePostgres) {
+          const initSqlPath = path.join(__dirname, "..", "..", "database", "init.sql");
+          if (fs.existsSync(initSqlPath)) {
+            const sql = fs.readFileSync(initSqlPath, "utf-8");
+            await pool.query(sql);
+          }
+        }
+        memoryStore.guardians.clear();
+        memoryStore.students.clear();
+        memoryStore.benefits.clear();
+        memoryStore.deliveries.clear();
+        memoryStore.evidences.clear();
+        await recordAuditLog({
+          userId: req.user?.id,
+          username: req.user?.username || "admin",
+          action: "DATABASE_RESET",
+          details: { resetAt: (/* @__PURE__ */ new Date()).toISOString() },
+          ipAddress
+        });
+        return res.json({
+          ok: true,
+          message: "Base de datos y actas f\xEDsicas reseteadas exitosamente."
+        });
+      } catch (error) {
+        console.error("[RESET_DB] Error:", error);
         return res.status(500).json({ message: "Error al reiniciar la base de datos.", error: error.message });
       }
     }
@@ -1841,6 +2281,9 @@ var require_app = __commonJS({
 });
 
 // server.js
+if (!process.env.TZ) {
+  process.env.TZ = "America/Santiago";
+}
 require("dotenv").config();
 var app = require_app();
 var env = require_env();
@@ -1851,6 +2294,7 @@ async function startServer() {
     console.log("=======================================================");
     console.log("  ProyectoPMM - Municipalidad de Quilpu\xE9 (v2.0 Modular)");
     console.log(`  Servidor activo en: http://localhost:${env.PORT}`);
+    console.log(`  Huso horario fijado: ${process.env.TZ}`);
     console.log("  M\xF3dulos: Auth, Beneficiarios, Entregas, Auditor\xEDa, Importador");
     console.log("  Seguridad: Helmet activo, Rate Limiting activo, RUT Full");
     console.log("  Usuarios iniciales:");

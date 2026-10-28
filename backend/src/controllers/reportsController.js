@@ -1,3 +1,4 @@
+const { getChileDateString, getChileHour, getChileDateTimeString } = require("../utils/timezone");
 const xlsx = require("xlsx");
 const { pool, usePostgres, memoryStore } = require("../config/db");
 
@@ -59,7 +60,7 @@ async function getKpis(req, res) {
     const sectorCounter = {};
     let totalExcelAprobados = 0;
     let entregadosExcelConActa = 0;
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = getChileDateString();
 
     // CONSULTA POSTGRESQL O MEMORIA
     if (usePostgres) {
@@ -276,7 +277,7 @@ async function exportTransparencyExcel(req, res) {
 
     const worksheetData = [
       ["REPORTE DE TRANSPARENCIA - ENTREGAS DE SETS ESCOLARES"],
-      [`Fecha de emisión: ${new Date().toLocaleDateString("es-CL")} ${new Date().toLocaleTimeString("es-CL")}`],
+      [`Fecha de emisión (Chile): ${getChileDateTimeString()}`],
       [],
       ["NIVEL EDUCACIONAL", "TIPO DE SET", "CANTIDAD ENTREGADA"],
     ];
@@ -299,7 +300,7 @@ async function exportTransparencyExcel(req, res) {
     xlsx.utils.book_append_sheet(workbook, worksheet, "Cantidades Entregadas");
 
     const excelBuffer = xlsx.write(workbook, { bookType: "xlsx", type: "buffer" });
-    const filename = `Reporte_Transparencia_Entregas_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const filename = `Reporte_Transparencia_Entregas_${getChileDateString()}.xlsx`;
 
     res.setHeader(
       "Content-Type",
