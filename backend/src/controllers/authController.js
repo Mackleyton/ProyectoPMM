@@ -33,8 +33,8 @@ async function login(req, res) {
     }
 
     let username = rawUsername.toLowerCase();
-    if (username.includes("admin")) username = "admin";
-    else if (username.includes("terreno")) username = "terreno";
+    if (username === "admin" || username === "admin@quilpue.cl") username = "admin";
+    else if (username === "terreno" || username === "terreno@quilpue.cl") username = "terreno";
 
     let user = null;
 

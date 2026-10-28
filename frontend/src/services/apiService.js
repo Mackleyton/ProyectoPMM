@@ -195,10 +195,12 @@ export const apiService = {
     };
   },
 
-  async obtenerBeneficiarios({ search = '', estado = 'TODOS' } = {}) {
+  async obtenerBeneficiarios({ search = '', estado = 'TODOS', page = 1, limit = 50 } = {}) {
     const query = new URLSearchParams();
     if (search) query.append('search', search);
     if (estado && estado !== 'TODOS') query.append('estado', estado);
+    query.append('page', page);
+    query.append('limit', limit);
 
     const res = await fetch(`${API_BASE}/api/beneficiaries?${query.toString()}`, {
       method: 'GET',
@@ -211,7 +213,16 @@ export const apiService = {
       throw new Error(data.message || 'Error al consultar beneficiarios');
     }
 
-    return Array.isArray(data) ? data : [];
+    // Soporte para formato paginado { items, total, page, totalPages } o lista directa
+    if (data && typeof data === 'object' && Array.isArray(data.items)) {
+      return data;
+    }
+    return {
+      items: Array.isArray(data) ? data : [],
+      total: Array.isArray(data) ? data.length : 0,
+      page: 1,
+      totalPages: 1,
+    };
   },
 
   /**

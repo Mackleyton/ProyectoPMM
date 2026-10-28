@@ -7,6 +7,10 @@ export default function AdminBeneficiariosPage() {
   const [search, setSearch] = useState('');
   const [filtroEstado, setFiltroEstado] = useState('TODOS');
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalRegistros, setTotalRegistros] = useState(0);
+  const limit = 50;
 
   // Beneficiario seleccionado para ver el detalle
   const [selectedItem, setSelectedItem] = useState(null);
@@ -30,14 +34,23 @@ export default function AdminBeneficiariosPage() {
     return `${API_BASE}${url.startsWith('/') ? '' : '/'}${url}`;
   }
 
-  async function cargar() {
+  async function cargar(nuevaPagina = page) {
     setLoading(true);
     try {
-      const data = await apiService.obtenerBeneficiarios({
+      const res = await apiService.obtenerBeneficiarios({
         search,
         estado: filtroEstado,
+        page: nuevaPagina,
+        limit,
       });
-      setBeneficiarios(data);
+      if (res && res.items) {
+        setBeneficiarios(res.items);
+        setTotalRegistros(res.total || 0);
+        setTotalPages(res.totalPages || 1);
+        setPage(res.page || 1);
+      } else {
+        setBeneficiarios(Array.isArray(res) ? res : []);
+      }
     } catch (err) {
       console.error('Error al cargar beneficiarios:', err);
     } finally {
@@ -46,12 +59,14 @@ export default function AdminBeneficiariosPage() {
   }
 
   useEffect(() => {
-    cargar();
+    setPage(1);
+    cargar(1);
   }, [filtroEstado]);
 
   function handleSearchSubmit(e) {
     if (e) e.preventDefault();
-    cargar();
+    setPage(1);
+    cargar(1);
   }
 
   function handleOpenModal(mode) {
@@ -234,6 +249,53 @@ export default function AdminBeneficiariosPage() {
                     })}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {/* BARRA DE PAGINACIÓN */}
+            {!loading && totalRegistros > 0 && (
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '14px 20px',
+                borderTop: '1px solid #e2e8f0',
+                background: '#f8fafc',
+                flexWrap: 'wrap',
+                gap: '10px'
+              }}>
+                <div style={{ fontSize: '0.88rem', color: '#64748b' }}>
+                  Mostrando <strong>{((page - 1) * limit) + 1}</strong> - <strong>{Math.min(page * limit, totalRegistros)}</strong> de <strong>{totalRegistros.toLocaleString('es-CL')}</strong> beneficiarios
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm"
+                    disabled={page <= 1}
+                    onClick={() => {
+                      const p = page - 1;
+                      setPage(p);
+                      cargar(p);
+                    }}
+                  >
+                    ← Anterior
+                  </button>
+                  <span style={{ fontSize: '0.88rem', color: '#475569', margin: '0 6px' }}>
+                    Página <strong>{page}</strong> de <strong>{totalPages}</strong>
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm"
+                    disabled={page >= totalPages}
+                    onClick={() => {
+                      const p = page + 1;
+                      setPage(p);
+                      cargar(p);
+                    }}
+                  >
+                    Siguiente →
+                  </button>
+                </div>
               </div>
             )}
           </div>

@@ -577,10 +577,6 @@ var require_db = __commonJS({
       }
     }
     async function initDatabase2() {
-      const initialExcel = findInitialExcelFile();
-      if (initialExcel) {
-        loadExcelToMemory(initialExcel, true);
-      }
       try {
         const client = await pool.connect();
         console.log("[DB] Conexi\xF3n establecida con PostgreSQL.");
@@ -773,8 +769,8 @@ var require_authController = __commonJS({
           return res.status(400).json({ message: "Debes ingresar usuario y contrase\xF1a." });
         }
         let username = rawUsername.toLowerCase();
-        if (username.includes("admin")) username = "admin";
-        else if (username.includes("terreno")) username = "terreno";
+        if (username === "admin" || username === "admin@quilpue.cl") username = "admin";
+        else if (username === "terreno" || username === "terreno@quilpue.cl") username = "terreno";
         let user = null;
         if (usePostgres) {
           try {
@@ -1122,42 +1118,31 @@ var require_beneficiariesController = __commonJS({
                   email: guardian2.email,
                   phone: guardian2.phone
                 },
-                benefits: bRes.rows.map((b) => {
-                  const evId = b.evidence_id || b.photo_evidence_id;
-                  return {
-                    benefitId: b.benefit_id,
-                    benefitName: b.benefit_name,
-                    status: b.status,
-                    deliveredAt: b.delivered_at,
-                    evidenceId: evId,
-                    fotoActa: evId ? `/api/evidences/${evId}/file` : null,
-                    student: {
-                      rut: b.student_rut,
-                      fullName: fullName(b.first_name, b.paternal_last_name, b.maternal_last_name),
-                      establishment: b.establishment,
-                      educationalLevel: b.educational_level
-                    }
-                  };
-                })
+                benefits: bRes.rows.map((r) => ({
+                  id: r.benefit_id,
+                  name: r.benefit_name,
+                  status: r.status,
+                  deliveredAt: r.delivered_at,
+                  evidenceId: r.evidence_id,
+                  photoEvidenceUrl: r.photo_evidence_id ? `/api/evidences/${r.photo_evidence_id}/file` : null,
+                  student: {
+                    rut: r.student_rut,
+                    fullName: fullName(r.first_name, r.paternal_last_name, r.maternal_last_name),
+                    establishment: r.establishment,
+                    educationalLevel: r.educational_level
+                  }
+                }))
               });
             }
           } catch (dbErr) {
-            console.warn("[BENEFICIARIOS] Error consultando PostgreSQL:", dbErr.message);
+            console.warn("[BENEFICIARIOS] Error buscando por RUT en PostgreSQL:", dbErr.message);
           }
         }
-        let guardian = memoryStore.guardians.get(rutFormatted);
-        if (!guardian) {
-          const student = memoryStore.students.get(rutFormatted);
-          if (student) {
-            guardian = memoryStore.guardians.get(student.guardianRut);
-          }
-        }
-        if (!guardian) {
-          for (const g of memoryStore.guardians.values()) {
-            if (cleanRut(g.rut) === rutClean) {
-              guardian = g;
-              break;
-            }
+        let guardian = null;
+        for (const g of memoryStore.guardians.values()) {
+          if (cleanRut(g.rut) === rutClean) {
+            guardian = g;
+            break;
           }
         }
         if (!guardian) {
@@ -1169,26 +1154,24 @@ var require_beneficiariesController = __commonJS({
           }
         }
         if (!guardian) {
-          return res.status(404).json({
-            message: `No se encontraron beneficiarios registrados para el RUT ${rutParam}.`
-          });
+          return res.status(404).json({ message: "No se encontr\xF3 ning\xFAn beneficiario o apoderado con el RUT ingresado." });
         }
-        const benefits = [];
+        const assignedBenefits = [];
         for (const b of memoryStore.benefits.values()) {
-          if (b.guardianRut === guardian.rut) {
+          if (cleanRut(b.guardianRut) === cleanRut(guardian.rut)) {
             const student = memoryStore.students.get(b.studentRut);
-            benefits.push({
-              benefitId: b.id,
-              benefitName: b.benefitName,
+            assignedBenefits.push({
+              id: b.id,
+              name: b.benefitName,
               status: b.status,
               deliveredAt: b.deliveredAt,
               evidenceId: b.evidenceId,
-              fotoActa: b.evidenceId ? `/api/evidences/${b.evidenceId}/file` : null,
+              photoEvidenceUrl: b.evidenceId ? `/api/evidences/${b.evidenceId}/file` : null,
               student: {
                 rut: student ? student.rut : b.studentRut,
-                fullName: student ? student.fullName : "Alumno",
-                establishment: student ? student.establishment : "Quilpu\xE9",
-                educationalLevel: student ? student.educationalLevel : "General"
+                fullName: student ? student.fullName || fullName(student.firstName, student.paternalLastName, student.maternalLastName) : "Alumno",
+                establishment: student ? student.establishment : "Establecimiento",
+                educationalLevel: student ? student.educationalLevel : "Nivel"
               }
             });
           }
@@ -1198,13 +1181,13 @@ var require_beneficiariesController = __commonJS({
           guardian: {
             id: guardian.id,
             rut: guardian.rut,
-            fullName: guardian.fullName,
+            fullName: guardian.fullName || fullName(guardian.firstName, guardian.paternalLastName, guardian.maternalLastName),
             address: guardian.address,
             sector: guardian.sector,
             email: guardian.email,
             phone: guardian.phone
           },
-          benefits
+          benefits: assignedBenefits
         });
       } catch (error) {
         return res.status(500).json({ message: "Error al consultar beneficiario.", error: error.message });
@@ -1214,8 +1197,46 @@ var require_beneficiariesController = __commonJS({
       try {
         const search = String(req.query.search || "").trim().toLowerCase();
         const estado = String(req.query.estado || "").trim().toUpperCase();
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const limit = Math.max(1, Math.min(200, parseInt(req.query.limit, 10) || 50));
+        const offset = (page - 1) * limit;
         if (usePostgres) {
           try {
+            const params = [];
+            let whereClauses = [];
+            if (search) {
+              const cleanSearch = cleanRut(search);
+              params.push(`%${search}%`);
+              const p1 = `$${params.length}`;
+              params.push(`%${cleanSearch}%`);
+              const p2 = `$${params.length}`;
+              whereClauses.push(`(
+            LOWER(g.first_name || ' ' || COALESCE(g.paternal_last_name, '') || ' ' || COALESCE(g.maternal_last_name, '')) LIKE ${p1}
+            OR LOWER(s.first_name || ' ' || COALESCE(s.paternal_last_name, '') || ' ' || COALESCE(s.maternal_last_name, '')) LIKE ${p1}
+            OR regexp_replace(g.rut, '[^0-9kK]', '', 'g') LIKE ${p2}
+            OR regexp_replace(s.rut, '[^0-9kK]', '', 'g') LIKE ${p2}
+          )`);
+            }
+            if (estado && estado !== "TODOS") {
+              if (estado === "ENTREGADO") {
+                whereClauses.push(`bb.status = 'DELIVERED'`);
+              } else if (estado === "PENDIENTE") {
+                whereClauses.push(`(bb.status IS NULL OR bb.status != 'DELIVERED')`);
+              }
+            }
+            const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+            const countQuery = `
+          SELECT COUNT(bb.id) AS total
+          FROM beneficiary_benefits bb
+          JOIN guardians g ON g.id = bb.guardian_id
+          JOIN students s ON s.id = bb.student_id
+          ${whereSql}
+        `;
+            const countRes = await pool.query(countQuery, params);
+            const total2 = parseInt(countRes.rows[0]?.total || 0, 10);
+            const queryParams = [...params, limit, offset];
+            const limitParam = `$${queryParams.length - 1}`;
+            const offsetParam = `$${queryParams.length}`;
             const pgQuery = `
           SELECT DISTINCT ON (bb.id)
             bb.id,
@@ -1239,44 +1260,41 @@ var require_beneficiariesController = __commonJS({
           JOIN students s ON s.id = bb.student_id
           JOIN benefit_types bt ON bt.id = bb.benefit_type_id
           LEFT JOIN delivery_evidences de ON de.id = bb.evidence_id
+          ${whereSql}
           ORDER BY bb.id, g.paternal_last_name, s.first_name
+          LIMIT ${limitParam} OFFSET ${offsetParam}
         `;
-            const dbRes = await pool.query(pgQuery);
-            if (dbRes.rowCount > 0) {
-              let results2 = dbRes.rows.map((row) => ({
-                id: row.id,
-                rut_apoderado: row.rut_apoderado,
-                nombre_apoderado: row.nombre_apoderado,
-                direccion: row.direccion,
-                sector: row.sector,
-                telefono_apoderado: row.telefono_apoderado,
-                correo_apoderado: row.correo_apoderado,
-                rut_alumno: row.rut_alumno,
-                nombre_alumno: row.nombre_alumno,
-                establecimiento: row.establecimiento,
-                nivel_educacional: row.nivel_educacional,
-                estado: row.estado,
-                beneficio_nombre: row.beneficio_nombre,
-                entregado: row.entregado,
-                fecha_entrega: row.fecha_entrega,
-                foto_acta: row.evidence_id ? `/api/evidences/${row.evidence_id}/file` : null
-              }));
-              if (search) {
-                results2 = results2.filter(
-                  (row) => row.nombre_apoderado.toLowerCase().includes(search) || row.nombre_alumno.toLowerCase().includes(search) || cleanRut(row.rut_apoderado).includes(cleanRut(search)) || cleanRut(row.rut_alumno).includes(cleanRut(search))
-                );
-              }
-              if (estado && estado !== "TODOS") {
-                if (estado === "ENTREGADO") results2 = results2.filter((r) => r.entregado);
-                else if (estado === "PENDIENTE") results2 = results2.filter((r) => !r.entregado);
-              }
-              return res.json(results2);
-            }
+            const dbRes = await pool.query(pgQuery, queryParams);
+            const items = dbRes.rows.map((row) => ({
+              id: row.id,
+              rut_apoderado: row.rut_apoderado,
+              nombre_apoderado: row.nombre_apoderado,
+              direccion: row.direccion,
+              sector: row.sector,
+              telefono_apoderado: row.telefono_apoderado,
+              correo_apoderado: row.correo_apoderado,
+              rut_alumno: row.rut_alumno,
+              nombre_alumno: row.nombre_alumno,
+              establecimiento: row.establecimiento,
+              nivel_educacional: row.nivel_educacional,
+              estado: row.estado,
+              beneficio_nombre: row.beneficio_nombre,
+              entregado: row.entregado,
+              fecha_entrega: row.fecha_entrega,
+              foto_acta: row.evidence_id ? `/api/evidences/${row.evidence_id}/file` : null
+            }));
+            return res.json({
+              items,
+              total: total2,
+              page,
+              limit,
+              totalPages: Math.ceil(total2 / limit) || 1
+            });
           } catch (dbErr) {
             console.warn("[BENEFICIARIOS] Error consultando PostgreSQL:", dbErr.message);
           }
         }
-        let results = [];
+        let allResults = [];
         for (const b of memoryStore.benefits.values()) {
           const guardian = memoryStore.guardians.get(b.guardianRut);
           const student = memoryStore.students.get(b.studentRut);
@@ -1306,9 +1324,17 @@ var require_beneficiariesController = __commonJS({
             if (estado === "ENTREGADO" && !row.entregado) continue;
             if (estado === "PENDIENTE" && row.entregado) continue;
           }
-          results.push(row);
+          allResults.push(row);
         }
-        return res.json(results);
+        const total = allResults.length;
+        const paginatedItems = allResults.slice(offset, offset + limit);
+        return res.json({
+          items: paginatedItems,
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit) || 1
+        });
       } catch (error) {
         return res.status(500).json({ message: "Error al listar beneficiarios.", error: error.message });
       }

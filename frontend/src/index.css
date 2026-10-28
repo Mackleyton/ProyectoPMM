@@ -2844,3 +2844,77 @@ html, body {
     grid-template-columns: 1fr !important;
   }
 }
+
+
+/* ==========================================================================
+   CORRECCIÓN Y AJUSTES DE TAMAÑO DE VISTA PREVIA DE IMÁGENES / ACTAS
+   ========================================================================== */
+
+/* En pantalla de escritorio oculta el botón de logout duplicado del menú móvil */
+@media (min-width: 821px) {
+  .logout-mobile-link {
+    display: none !important;
+  }
+}
+
+/* Vista previa de imagen en modal de entrega individual */
+.preview-img {
+  width: 100% !important;
+  max-width: 360px !important;
+  max-height: 220px !important;
+  object-fit: contain !important;
+  border-radius: var(--radius-md) !important;
+  border: 1px solid var(--border-color, #cbd5e1) !important;
+  background-color: #0f172a !important;
+  display: block !important;
+  margin: 12px auto !important;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1) !important;
+}
+
+/* Caja de previsualización en TerrenoView */
+.captured-preview-box {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  background: #f8fafc !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: var(--radius-md) !important;
+  padding: 12px !important;
+  margin: 12px 0 !important;
+  gap: 12px !important;
+}
+
+@media (min-width: 600px) {
+  .captured-preview-box {
+    flex-direction: row !important;
+    justify-content: space-between !important;
+  }
+}
+
+.acta-preview-thumb {
+  width: 100% !important;
+  max-width: 180px !important;
+  height: 120px !important;
+  max-height: 120px !important;
+  object-fit: contain !important;
+  border-radius: 6px !important;
+  background: #0f172a !important;
+  border: 1px solid #94a3b8 !important;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
+}
+
+.captured-meta {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 8px !important;
+  font-size: 0.88rem !important;
+  color: #334155 !important;
+  font-weight: 500 !important;
+}
+
+@media (min-width: 600px) {
+  .captured-meta {
+    align-items: flex-start !important;
+  }
+}

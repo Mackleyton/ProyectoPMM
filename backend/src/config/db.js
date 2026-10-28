@@ -245,11 +245,8 @@ async function syncDataToPostgres(client, parsedItems, replace = false) {
 }
 
 async function initDatabase() {
-  // Cargar datos en memoria primero
-  const initialExcel = findInitialExcelFile();
-  if (initialExcel) {
-    loadExcelToMemory(initialExcel, true);
-  }
+  // Pre-carga desactivada para permitir base de datos limpia y soporte de Excels masivos
+  // (Si se requiere cargar, se realiza desde la interfaz de administración)
 
   try {
     const client = await pool.connect();
